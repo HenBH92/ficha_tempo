@@ -8,7 +8,7 @@ from pathlib import Path
 
 from caminhos import VERSAO
 
-REPO = "SEU-USUARIO/ficha-tempo"  # troque pelo "dono/nome" do repositório no GitHub
+REPO = "HenBH92/ficha_tempo"
 URL_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 
 

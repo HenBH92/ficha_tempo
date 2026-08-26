@@ -1,6 +1,30 @@
+# Ambiente Python
 .venv/
 __pycache__/
 *.pyc
+
+# Build / instalador (gerados localmente, não versionar binários)
 build/
 dist/
+installer_output/
+
+# Dados reais de clientes/planilhas — só o modelo em branco é versionado
+*.xlsx
+!aquivo_modelo.xlsx
+
+# Estado do app e perfil do Chrome do AdvWin, caso rodem na pasta do projeto
+# em vez de %APPDATA% (padrão é fora do repo, isso é só precaução)
+estado.json
+advwin-chrome-profile/
+
+# Segredos (nenhum usado hoje - login no AdvWin é sempre manual - mas por precaução)
+.env
+*.pem
+*.key
+
+# IDE / SO
 .claude/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

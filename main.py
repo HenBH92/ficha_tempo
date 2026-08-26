@@ -857,7 +857,19 @@ class App(ctk.CTk):
         try:
             self._instalador_pendente = atualizador.baixar_instalador(info["url"])
         except OSError:
-            pass
+            return
+        self.after(0, lambda: self._perguntar_atualizacao(info["versao"]))
+
+    def _perguntar_atualizacao(self, versao: str) -> None:
+        if not messagebox.askyesno(
+            "Atualização disponível",
+            f"Uma nova versão ({versao}) está disponível.\n\n"
+            "Instalar agora? O programa será fechado e reaberto automaticamente ao final.",
+        ):
+            return
+        self.salvar()
+        atualizador.instalar_silenciosamente(self._instalador_pendente)
+        self.destroy()
 
     def _ao_fechar(self) -> None:
         self.salvar()
