@@ -245,7 +245,7 @@ class TimerCard(ctk.CTkFrame):
         self.btn_inserir = ctk.CTkButton(linha5, text="", image=icones.icone("inserir", cor="white"), width=36,
                                           fg_color=COR_SUCESSO, hover_color=COR_SUCESSO_HOVER, command=self._inserir)
         self.btn_inserir.pack(side="left", padx=2)
-        Tooltip(self.btn_inserir, "Inserir na planilha")
+        Tooltip(self.btn_inserir, "Inserir no AdvWin")
         self.btn_remover = ctk.CTkButton(linha5, text="", image=icones.icone("remover", cor=COR_PERIGO), width=36,
                                           fg_color="transparent", border_width=1, border_color=COR_PERIGO,
                                           hover_color=COR_PERIGO_HOVER, command=self._remover)
@@ -600,13 +600,22 @@ class App(ctk.CTk):
 
         ctk.CTkFrame(self, fg_color=COR_HEADER_BORDA, height=1).pack(fill="x")
 
-        # Rodapé precisa ser empacotado (side="bottom") antes do scroll (fill="both",
-        # expand=True) - senão o scroll toma a área toda e não sobra espaço pro rodapé.
+        # Rodapé e a barra "Lançar todas" precisam ser empacotados (side="bottom") antes do
+        # scroll (fill="both", expand=True) - senão o scroll toma a área toda e não sobra
+        # espaço pra eles. Ficam fora do scroll de propósito: dentro dele, o scrollregion do
+        # CTkScrollableFrame não recalculava certo com cards_frame usando grid, e o botão
+        # ficava inacessível mesmo rolando até o fim.
         self.rodape = ctk.CTkFrame(self, fg_color=COR_HEADER_FUNDO, corner_radius=0, height=26)
         self.rodape.pack(fill="x", side="bottom")
         self.rodape.pack_propagate(False)
         self.label_salvo = ctk.CTkLabel(self.rodape, text="", font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE)
         self.label_salvo.pack(side="right", padx=16)
+
+        self.btn_inserir_todos = ctk.CTkButton(
+            self, text="Lançar todas no AdvWin", height=40, font=FONTE_BOTAO,
+            fg_color=COR_SUCESSO, hover_color=COR_SUCESSO_HOVER, command=self._inserir_todos,
+        )
+        self.btn_inserir_todos.pack(fill="x", side="bottom", padx=16, pady=(0, 12))
 
         self.scroll = ctk.CTkScrollableFrame(self, fg_color=("white", "#18181d"))
         self.scroll.pack(fill="both", expand=True, padx=16, pady=16)
@@ -618,14 +627,12 @@ class App(ctk.CTk):
         # Mede/observa self.scroll (largura fixada de fora, pelo layout da janela) - não
         # cards_frame, cuja própria largura pedida depende de quantas colunas o grid interno
         # tem (referência circular: encolhia a janela, mas a largura medida não acompanhava).
-        self.scroll.bind("<Configure>", self._ao_redimensionar_cards)
+        # add="+" é obrigatório aqui: o CustomTkinter já tem um bind interno de <Configure>
+        # nesse mesmo widget pra recalcular o scrollregion do canvas - sem add="+", .bind()
+        # substitui esse handler e a área para de rolar de verdade.
+        self.scroll.bind("<Configure>", self._ao_redimensionar_cards, add="+")
 
         self.cards: list[TimerCard] = []
-        self.btn_inserir_todos = ctk.CTkButton(
-            self.scroll, text="Lançar todas no AdvWin", height=40, font=FONTE_BOTAO,
-            fg_color=COR_SUCESSO, hover_color=COR_SUCESSO_HOVER, command=self._inserir_todos,
-        )
-        self.btn_inserir_todos.pack(fill="x", pady=(6, 0))
         for timer in timers:
             self._adicionar_card(timer)
         if not self.cards:
