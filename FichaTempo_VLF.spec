@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='VLF-FichaDeTempo',
+    name='FichaTempo_VLF',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

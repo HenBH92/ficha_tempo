@@ -11,7 +11,9 @@ python main.py
 
 ## Build / instalador
 
-`VLF-FichaDeTempo.spec` (PyInstaller) e `installer.iss` (Inno Setup) já existem no repo, mas o processo de build/distribuição ainda está sendo definido — não assumir comandos prontos, confirmar antes de empacotar/distribuir.
+`FichaTempo_VLF.spec` (PyInstaller) e `installer.iss` (Inno Setup) já existem no repo, mas o processo de build/distribuição ainda está sendo definido — não assumir comandos prontos, confirmar antes de empacotar/distribuir.
+
+Nome do executável gerado: `FichaTempo_VLF.exe` (renomeado de `VLF-FichaDeTempo.exe` em 2026-08-28, mesma convenção nos próximos builds/instaladores).
 
 ## Arquitetura (um módulo, uma responsabilidade)
 

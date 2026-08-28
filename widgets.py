@@ -5,6 +5,7 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 import modelos
+from cores import COR_BORDA_CARD, COR_FUNDO_CARD, COR_HOVER_NEUTRO, COR_PRIMARIA, COR_TEXTO_SUAVE, COR_TOOLTIP_FUNDO
 
 MAX_RESULTADOS = 40
 
@@ -13,8 +14,8 @@ def _cores_popup() -> tuple[str, str, str, str, str]:
     """Cores do popup de busca (bg, fg, selectbg, selectfg, borda), ajustadas ao modo
     claro/escuro atual do CTk - tk.Listbox é Tk puro e não segue o tema sozinho."""
     if ctk.get_appearance_mode() == "Dark":
-        return "#26262e", "#e6e6ec", "#201747", "white", "#3a3a44"
-    return "white", "#26262e", "#201747", "white", "#c7c7d1"
+        return COR_FUNDO_CARD[1], "#e6e6ec", COR_PRIMARIA, "white", COR_BORDA_CARD[1]
+    return "white", "#26262e", COR_PRIMARIA, "white", COR_BORDA_CARD[0]
 
 
 class BuscaCombobox(ctk.CTkFrame):
@@ -37,8 +38,8 @@ class BuscaCombobox(ctk.CTkFrame):
         self.entry.bind("<Button-1>", self._ao_clicar)
 
         self.btn_seta = ctk.CTkButton(self, text="▼", width=22, fg_color="transparent",
-                                       border_width=1, border_color="#c7c7d1", text_color="#6c6c78",
-                                       hover_color="#e1e1ea", command=self._mostrar_todos)
+                                       border_width=1, border_color=COR_BORDA_CARD, text_color=COR_TEXTO_SUAVE,
+                                       hover_color=COR_HOVER_NEUTRO, command=self._mostrar_todos)
         self.btn_seta.pack(side="left", padx=(2, 0))
 
     def get(self) -> str:
@@ -203,7 +204,7 @@ class Tooltip:
         self.popup = tk.Toplevel(self.widget)
         self.popup.wm_overrideredirect(True)
         self.popup.wm_geometry(f"+{x}+{y}")
-        tk.Label(self.popup, text=self.texto, justify="left", background="#333333",
+        tk.Label(self.popup, text=self.texto, justify="left", background=COR_TOOLTIP_FUNDO,
                  foreground="white", relief="solid", borderwidth=1,
                  font=("Segoe UI", 9), padx=8, pady=6, wraplength=260).pack()
 

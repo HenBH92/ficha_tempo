@@ -2,10 +2,10 @@
 ; Requer o Inno Setup (compilador ISCC) - baixar em https://jrsoftware.org/isdl.php
 ;
 ; Como usar:
-;   1. Gere o exe:  pyinstaller VLF-FichaDeTempo.spec
+;   1. Gere o exe:  pyinstaller FichaTempo_VLF.spec
 ;   2. Compile este script: iscc installer.iss
 ;      (ou abra o arquivo no Inno Setup Compiler e clique em "Compile")
-;   3. O instalador sai em installer_output\VLF-FichaDeTempo-Setup-{versao}.exe
+;   3. O instalador sai em installer_output\FichaTempo_VLF-Setup-{versao}.exe
 ;
 ; A cada nova versão do app, so precisa mudar o MyAppVersion abaixo.
 ; NUNCA mude o AppId depois do primeiro instalador distribuído - é ele que
@@ -14,7 +14,7 @@
 #define MyAppName "VLF Ficha de Tempo"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "VLF Advogados"
-#define MyAppExeName "VLF-FichaDeTempo.exe"
+#define MyAppExeName "FichaTempo_VLF.exe"
 
 [Setup]
 AppId={{71A50D86-36BD-4DCF-9866-7B0E05DE0B77}
@@ -28,7 +28,7 @@ DisableProgramGroupPage=yes
 ; Instala só para o usuário atual - sem pedir permissão de administrador (UAC)
 PrivilegesRequired=lowest
 OutputDir=installer_output
-OutputBaseFilename=VLF-FichaDeTempo-Setup-{#MyAppVersion}
+OutputBaseFilename=FichaTempo_VLF-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 SetupIconFile=assets\vlf_icon.ico

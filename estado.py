@@ -51,9 +51,10 @@ class Timer:
         self.status = "parado"
 
 
-def salvar_estado(timers: list[Timer], advogado_atual: str = "") -> None:
+def salvar_estado(timers: list[Timer], advogado_atual: str = "", area_atual: str = "Trabalhista") -> None:
     conteudo = {
         "advogado_atual": advogado_atual,
+        "area_atual": area_atual,
         "timers": [asdict(t) for t in timers],
     }
     ARQUIVO_ESTADO.write_text(
@@ -62,16 +63,16 @@ def salvar_estado(timers: list[Timer], advogado_atual: str = "") -> None:
     )
 
 
-def carregar_estado() -> tuple[list[Timer], str]:
+def carregar_estado() -> tuple[list[Timer], str, str]:
     if not ARQUIVO_ESTADO.exists():
-        return [], ""
+        return [], "", "Trabalhista"
     conteudo = json.loads(ARQUIVO_ESTADO.read_text(encoding="utf-8"))
     campos_validos = {f.name for f in fields(Timer)}
     timers = [Timer(**{k: v for k, v in d.items() if k in campos_validos}) for d in conteudo["timers"]]
     for t in timers:
         if t.status == "rodando":
             t.pausar()
-    return timers, conteudo.get("advogado_atual", "")
+    return timers, conteudo.get("advogado_atual", ""), conteudo.get("area_atual", "Trabalhista")
 
 
 def _demo():

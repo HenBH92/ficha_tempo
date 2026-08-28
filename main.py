@@ -1,16 +1,13 @@
 """App de ficha de tempo: múltiplos cronômetros -> linhas na planilha diária do AdvWin."""
 import ctypes
 import math
-import threading
 from datetime import datetime, timedelta
-from pathlib import Path
 from tkinter import messagebox
 
 import customtkinter as ctk
 from PIL import Image
 
 import advwin
-import atualizador
 import estado
 import favoritos
 import icones
@@ -18,37 +15,37 @@ import modelos
 import planilha
 import retro_preview
 from caminhos import pasta_recursos
+from cores import (
+    COR_BORDA_CARD,
+    COR_CARD_INSERIDO,
+    COR_CARD_PAUSADO,
+    COR_CARD_RODANDO,
+    COR_FUNDO_CARD,
+    COR_HEADER_BORDA,
+    COR_HEADER_FUNDO,
+    COR_ICONE_NEUTRO,
+    COR_MARCA_LARANJA,
+    COR_MARCA_LARANJA_CLARA,
+    COR_NEUTRO,
+    COR_NEUTRO_HOVER,
+    COR_PERIGO,
+    COR_PERIGO_HOVER,
+    COR_PRIMARIA,
+    COR_PRIMARIA_CLARA,
+    COR_PRIMARIA_HOVER,
+    COR_RELOGIO_DIGITO,
+    COR_RELOGIO_LEGENDA,
+    COR_SUCESSO,
+    COR_SUCESSO_HOVER,
+    COR_TEXTO_SUAVE,
+)
 from widgets import BuscaCombobox, DescricaoModeloEntry, Tooltip
 
 PASTA_ASSETS = pasta_recursos() / "assets"
 
-# Cores de marca/status: mantidas fixas entre os temas (já contrastam bem em fundo
-# claro ou escuro). Cores de superfície (fundo, borda, texto suave): tupla
-# (claro, escuro) - o CTk troca sozinha quando o modo de aparência muda.
-COR_PRIMARIA = "#201747"
-COR_PRIMARIA_HOVER = "#342a63"
-COR_PRIMARIA_CLARA = ("#efedf7", "#2e2a42")
-COR_TEXTO_SUAVE = ("#6c6c78", "#9a99a8")
-COR_FUNDO_CARD = ("#f7f7fb", "#26262e")
-COR_BORDA_CARD = ("#e1e1ea", "#3a3a44")
-COR_SUCESSO = "#1f6f4a"
-COR_SUCESSO_HOVER = "#175939"
-COR_PERIGO = "#b3261e"
-COR_PERIGO_HOVER = ("#fbeceb", "#3a2020")
-COR_NEUTRO = "#4b4b58"
-COR_NEUTRO_HOVER = "#33333d"
-COR_HEADER_FUNDO = ("#f6f5fb", "#201d29")
-COR_HEADER_BORDA = ("#e4e2ef", "#3a3646")
-COR_CARD_RODANDO = ("#e9f2ed", "#1d3327")
-COR_CARD_PAUSADO = ("#f5f0e4", "#3a3122")
-COR_CARD_INSERIDO = ("#ffffff", "#1f1f26")
-COR_DOURADO = "#b8860b"
-COR_RELOGIO_DIGITO = "#7cffc4"
-COR_RELOGIO_LEGENDA = "#a79cd1"
-COR_ICONE_NEUTRO = "#8c8c98"  # cor de ícone p/ botões neutros - só um hex (ícone é rasterizado, não segue tupla)
-
 LIMITE_INATIVIDADE_S = 10 * 60
 LARGURA_MIN_CARD = 300
+MAX_COLUNAS = 4
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -70,7 +67,7 @@ def _segundos_sem_atividade() -> float:
 def _bloco(master, rotulo: str) -> ctk.CTkFrame:
     """Frame com um rótulo pequeno em cima, para o campo ser empacotado dentro."""
     frame = ctk.CTkFrame(master, fg_color="transparent")
-    ctk.CTkLabel(frame, text=rotulo, font=ctk.CTkFont(size=11),
+    ctk.CTkLabel(frame, text=rotulo, font=ctk.CTkFont(size=10),
                  text_color=COR_TEXTO_SUAVE, anchor="w").pack(anchor="w")
     return frame
 
@@ -79,8 +76,8 @@ def _legenda_cor(master, cor: str, texto: str) -> ctk.CTkFrame:
     """Item de legenda: quadradinho colorido + texto, para explicar as cores dos cards."""
     item = ctk.CTkFrame(master, fg_color="transparent")
     ctk.CTkFrame(item, fg_color=cor, border_width=1, border_color=COR_BORDA_CARD,
-                 width=14, height=14, corner_radius=3).pack(side="left")
-    ctk.CTkLabel(item, text=texto, font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE).pack(side="left", padx=(5, 0))
+                 width=11, height=11, corner_radius=3).pack(side="left")
+    ctk.CTkLabel(item, text=texto, font=ctk.CTkFont(size=10), text_color=COR_TEXTO_SUAVE).pack(side="left", padx=(5, 0))
     return item
 
 
@@ -158,7 +155,7 @@ class TimerCard(ctk.CTkFrame):
         self.timer = timer
 
         linha1 = ctk.CTkFrame(self, fg_color="transparent")
-        linha1.pack(fill="x", padx=12, pady=(12, 4))
+        linha1.pack(fill="x", padx=12, pady=(10, 3))
 
         bloco_data = _bloco(linha1, "Data")
         bloco_data.pack(side="left", padx=(0, 6))
@@ -176,7 +173,7 @@ class TimerCard(ctk.CTkFrame):
                 "mas Pasta e Descrição são mantidos.")
 
         linha2 = ctk.CTkFrame(self, fg_color="transparent")
-        linha2.pack(fill="x", padx=12, pady=4)
+        linha2.pack(fill="x", padx=12, pady=3)
 
         bloco_pasta = _bloco(linha2, "Pasta")
         bloco_pasta.pack(fill="x")
@@ -186,14 +183,14 @@ class TimerCard(ctk.CTkFrame):
                                        command=self._atualizar_estrela_pasta)
         self.cb_pasta.set(timer.pasta)
         self.cb_pasta.pack(side="left", fill="x", expand=True)
-        self.btn_favoritar_pasta = ctk.CTkButton(linha_pasta, text="", image=icones.icone("estrela", cor=COR_DOURADO),
+        self.btn_favoritar_pasta = ctk.CTkButton(linha_pasta, text="", image=icones.icone("estrela", cor=COR_MARCA_LARANJA),
                                                    width=30, fg_color="transparent", border_width=1,
-                                                   border_color=COR_DOURADO, hover_color=COR_CARD_PAUSADO,
+                                                   border_color=COR_MARCA_LARANJA, hover_color=COR_MARCA_LARANJA_CLARA,
                                                    command=self._alternar_favorito_pasta)
         self.btn_favoritar_pasta.pack(side="left", padx=(4, 0))
 
         linha3 = ctk.CTkFrame(self, fg_color="transparent")
-        linha3.pack(fill="x", padx=12, pady=4)
+        linha3.pack(fill="x", padx=12, pady=3)
 
         bloco_descricao = _bloco(linha3, "Descrição")
         bloco_descricao.pack(fill="x")
@@ -210,7 +207,7 @@ class TimerCard(ctk.CTkFrame):
         self.btn_salvar_modelo.pack(side="left", padx=(4, 0))
 
         linha4 = ctk.CTkFrame(self, fg_color="transparent")
-        linha4.pack(fill="x", padx=12, pady=4)
+        linha4.pack(fill="x", padx=12, pady=3)
 
         bloco_hc = _bloco(linha4, "Horas")
         bloco_hc.pack(side="left", padx=(0, 12))
@@ -227,26 +224,29 @@ class TimerCard(ctk.CTkFrame):
         self.label_tempo.pack(anchor="w")
 
         linha5 = ctk.CTkFrame(self, fg_color="transparent")
-        linha5.pack(fill="x", padx=12, pady=(4, 12))
+        linha5.pack(fill="x", padx=12, pady=(3, 10))
 
-        self.btn_iniciar = ctk.CTkButton(linha5, text="", image=icones.icone("play", cor="white"), width=36,
+        self.btn_iniciar = ctk.CTkButton(linha5, text="", image=icones.icone("play", cor="white"), width=32,
                                           fg_color=COR_PRIMARIA, hover_color=COR_PRIMARIA_HOVER, command=self._iniciar)
         self.btn_iniciar.pack(side="left", padx=2)
         Tooltip(self.btn_iniciar, "Iniciar (Ctrl+Espaço)")
-        self.btn_pausar = ctk.CTkButton(linha5, text="", image=icones.icone("pause", cor=COR_PRIMARIA), width=36,
+        self.btn_pausar = ctk.CTkButton(linha5, text="", image=icones.icone("pause", cor=COR_PRIMARIA), width=32,
                                          fg_color="transparent", border_width=1, border_color=COR_PRIMARIA,
                                          hover_color=COR_PRIMARIA_CLARA, command=self._pausar)
         self.btn_pausar.pack(side="left", padx=2)
         Tooltip(self.btn_pausar, "Pausar (Ctrl+Espaço)")
-        self.btn_parar = ctk.CTkButton(linha5, text="", image=icones.icone("stop", cor="white"), width=36,
+        self.btn_parar = ctk.CTkButton(linha5, text="", image=icones.icone("stop", cor="white"), width=32,
                                         fg_color=COR_NEUTRO, hover_color=COR_NEUTRO_HOVER, command=self._parar)
         self.btn_parar.pack(side="left", padx=2)
         Tooltip(self.btn_parar, "Parar")
-        self.btn_inserir = ctk.CTkButton(linha5, text="", image=icones.icone("inserir", cor="white"), width=36,
+
+        ctk.CTkFrame(linha5, fg_color=COR_BORDA_CARD, width=1, height=24).pack(side="left", padx=6)
+
+        self.btn_inserir = ctk.CTkButton(linha5, text="", image=icones.icone("inserir", cor="white"), width=32,
                                           fg_color=COR_SUCESSO, hover_color=COR_SUCESSO_HOVER, command=self._inserir)
         self.btn_inserir.pack(side="left", padx=2)
         Tooltip(self.btn_inserir, "Inserir no AdvWin")
-        self.btn_remover = ctk.CTkButton(linha5, text="", image=icones.icone("remover", cor=COR_PERIGO), width=36,
+        self.btn_remover = ctk.CTkButton(linha5, text="", image=icones.icone("remover", cor=COR_PERIGO), width=32,
                                           fg_color="transparent", border_width=1, border_color=COR_PERIGO,
                                           hover_color=COR_PERIGO_HOVER, command=self._remover)
         self.btn_remover.pack(side="left", padx=2)
@@ -294,10 +294,10 @@ class TimerCard(ctk.CTkFrame):
 
     def _estilizar_estrela(self, botao: ctk.CTkButton, ativo: bool) -> None:
         if ativo:
-            botao.configure(fg_color=COR_DOURADO, border_width=0, image=icones.icone("estrela", cor="white"))
+            botao.configure(fg_color=COR_MARCA_LARANJA, border_width=0, image=icones.icone("estrela", cor="white"))
         else:
-            botao.configure(fg_color="transparent", border_width=1, border_color=COR_DOURADO,
-                             image=icones.icone("estrela", cor=COR_DOURADO))
+            botao.configure(fg_color="transparent", border_width=1, border_color=COR_MARCA_LARANJA,
+                             image=icones.icone("estrela", cor=COR_MARCA_LARANJA))
 
     def _atualizar_estrela_pasta(self) -> None:
         self._estilizar_estrela(self.btn_favoritar_pasta, self.cb_pasta.get() in self.app.pastas_favoritas)
@@ -382,8 +382,9 @@ class TimerCard(ctk.CTkFrame):
         self.btn_inserir.configure(text="⏳", image=None, state="disabled")
         self._definir_campos_travados(True)
         pasta, data, descricao, horas_texto = t.pasta, t.data, t.descricao, t.horas_cobraveis_texto
+        area = self.app.area_atual
         advwin.enfileirar(
-            lambda: advwin.lancar_horas(advwin.pagina_advwin(), pasta, data, descricao, horas_texto),
+            lambda: advwin.lancar_horas(advwin.pagina_advwin(), pasta, data, descricao, horas_texto, area),
             lambda resultado, erro: self._apos_inserir_advwin(erro, ao_concluir),
         )
 
@@ -486,8 +487,9 @@ class App(ctk.CTk):
         self.modelos_descricao = modelos.carregar_modelos()
         self.pastas_favoritas = favoritos.carregar_pastas()
 
-        timers, advogado_atual = estado.carregar_estado()
+        timers, advogado_atual, area_atual = estado.carregar_estado()
         self.advogado_atual = advogado_atual
+        self.area_atual = area_atual
 
         hoje = datetime.now().strftime("%d/%m/%Y")
         for t in timers:
@@ -505,7 +507,7 @@ class App(ctk.CTk):
         header.pack(fill="x")
 
         linha_titulo = ctk.CTkFrame(header, fg_color="transparent")
-        linha_titulo.pack(fill="x", padx=24, pady=(16, 8))
+        linha_titulo.pack(fill="x", padx=24, pady=(12, 6))
 
         titulo_frame = ctk.CTkFrame(linha_titulo, fg_color="transparent")
         titulo_frame.pack(side="left")
@@ -516,7 +518,11 @@ class App(ctk.CTk):
             largura = 170
             altura = round(largura * imagem.height / imagem.width)
             self.logo_ctk = ctk.CTkImage(light_image=imagem, dark_image=imagem, size=(largura, altura))
-            ctk.CTkLabel(titulo_frame, image=self.logo_ctk, text="").pack(anchor="w")
+            # Placa branca fixa: a arte do logo é navy sobre fundo transparente e não muda
+            # com o tema, então o fundo dela também precisa ficar fixo (senão some no dark mode).
+            placa_logo = ctk.CTkFrame(titulo_frame, fg_color="white", corner_radius=8)
+            placa_logo.pack(anchor="w")
+            ctk.CTkLabel(placa_logo, image=self.logo_ctk, text="").pack(padx=10, pady=6)
         else:
             ctk.CTkLabel(titulo_frame, text="VLF Advogados", font=ctk.CTkFont(size=20, weight="bold"),
                          text_color=COR_PRIMARIA).pack(anchor="w")
@@ -524,12 +530,23 @@ class App(ctk.CTk):
         advogado_frame = ctk.CTkFrame(linha_titulo, fg_color="transparent")
         advogado_frame.pack(side="left", fill="x", expand=True, padx=(30, 0))
 
-        ctk.CTkLabel(advogado_frame, text="Advogado responsável: *", text_color=COR_TEXTO_SUAVE).pack(side="left", padx=(0, 10))
+        linha_advogado = ctk.CTkFrame(advogado_frame, fg_color="transparent")
+        linha_advogado.pack(side="top", fill="x")
+        ctk.CTkLabel(linha_advogado, text="Advogado responsável: *", text_color=COR_TEXTO_SUAVE).pack(side="left", padx=(0, 10))
         self.cb_advogado_geral = BuscaCombobox(
-            advogado_frame, self.listas["Advogado"], placeholder_text="Seu nome", command=self._advogado_mudou
+            linha_advogado, self.listas["Advogado"], placeholder_text="Seu nome", command=self._advogado_mudou
         )
         self.cb_advogado_geral.set(advogado_atual)
         self.cb_advogado_geral.pack(side="left", fill="x", expand=True)
+
+        linha_area = ctk.CTkFrame(advogado_frame, fg_color="transparent")
+        linha_area.pack(side="top", fill="x", pady=(6, 0))
+        ctk.CTkLabel(linha_area, text="Área:", text_color=COR_TEXTO_SUAVE).pack(side="left", padx=(0, 10))
+        self.seg_area = ctk.CTkSegmentedButton(
+            linha_area, values=["Trabalhista", "Contencioso"], command=self._area_mudou
+        )
+        self.seg_area.set(area_atual or "Trabalhista")
+        self.seg_area.pack(side="left")
 
         self.btn_tema = ctk.CTkButton(linha_titulo, text="", image=icones.icone("lua", cor=COR_ICONE_NEUTRO),
                                        width=32, height=32, fg_color="transparent", border_width=1,
@@ -544,7 +561,7 @@ class App(ctk.CTk):
         barra_acoes.pack(fill="x")
 
         linha_topo = ctk.CTkFrame(barra_acoes, fg_color="transparent")
-        linha_topo.pack(fill="x", padx=24, pady=14)
+        linha_topo.pack(fill="x", padx=24, pady=10)
 
         # Relógio primeiro (side="right"): reserva o espaço dele antes dos botões, senão
         # fica espremido pra fora da janela quando a barra fluida ocupa tudo que sobrar.
@@ -555,25 +572,26 @@ class App(ctk.CTk):
         linha_acoes.pack(side="left", fill="both", expand=True)
 
         FONTE_BOTAO = ctk.CTkFont(size=13, weight="bold")
+        FONTE_BOTAO_SECUNDARIO = ctk.CTkFont(size=12)
 
         linha_acoes.adicionar(ctk.CTkButton(
             linha_acoes, text="+ Novo cronômetro", width=170, height=40, font=FONTE_BOTAO,
             fg_color=COR_PRIMARIA, text_color="white",
             hover_color=COR_PRIMARIA_HOVER, command=self.novo_card))
         linha_acoes.adicionar(ctk.CTkButton(
-            linha_acoes, text="Limpar tudo", width=140, height=40, font=FONTE_BOTAO,
+            linha_acoes, text="Limpar tudo", width=130, height=32, font=FONTE_BOTAO_SECUNDARIO,
             fg_color="transparent", border_width=1,
             border_color=COR_NEUTRO, text_color=COR_NEUTRO, hover_color=COR_HEADER_BORDA,
             command=self._limpar_tudo))
         self.btn_conectar_advwin = ctk.CTkButton(
-            linha_acoes, text="Conectar AdvWin", width=160, height=40, font=FONTE_BOTAO,
+            linha_acoes, text="Conectar AdvWin", width=150, height=32, font=FONTE_BOTAO_SECUNDARIO,
             fg_color="transparent", border_width=1,
             border_color=COR_PRIMARIA, text_color=COR_PRIMARIA, hover_color="white",
             command=self._conectar_advwin,
         )
         linha_acoes.adicionar(self.btn_conectar_advwin)
         self.btn_lancar_retroativo = ctk.CTkButton(
-            linha_acoes, text="Lançar retroativo (planilha)", width=210, height=40, font=FONTE_BOTAO,
+            linha_acoes, text="Lançar retroativo (planilha)", width=195, height=32, font=FONTE_BOTAO_SECUNDARIO,
             fg_color="transparent", border_width=1,
             border_color=COR_PRIMARIA, text_color=COR_PRIMARIA, hover_color="white",
             command=self._lancar_retroativo,
@@ -585,15 +603,15 @@ class App(ctk.CTk):
 
         # Separado dos outros de propósito: "Excluir tudo" é irreversível e não deve ficar
         # colado em "Limpar tudo" (nomes parecidos, risco de clique errado).
-        linha_acoes.adicionar(ctk.CTkFrame(linha_acoes, fg_color=COR_HEADER_BORDA, width=1, height=32))
+        linha_acoes.adicionar(ctk.CTkFrame(linha_acoes, fg_color=COR_HEADER_BORDA, width=1, height=24))
         linha_acoes.adicionar(ctk.CTkButton(
-            linha_acoes, text="Excluir tudo", width=140, height=40, font=FONTE_BOTAO,
+            linha_acoes, text="Excluir tudo", width=130, height=32, font=FONTE_BOTAO_SECUNDARIO,
             fg_color="transparent", border_width=1,
             border_color=COR_PERIGO, text_color=COR_PERIGO, hover_color=COR_PERIGO_HOVER,
             command=self._excluir_tudo))
 
         linha_legenda = ctk.CTkFrame(barra_acoes, fg_color="transparent")
-        linha_legenda.pack(pady=(0, 12))
+        linha_legenda.pack(pady=(4, 8))
         _legenda_cor(linha_legenda, COR_CARD_RODANDO, "Rodando").pack(side="left", padx=8)
         _legenda_cor(linha_legenda, COR_CARD_PAUSADO, "Pausado").pack(side="left", padx=8)
         _legenda_cor(linha_legenda, COR_CARD_INSERIDO, "Inserido").pack(side="left", padx=8)
@@ -613,7 +631,7 @@ class App(ctk.CTk):
 
         self.btn_inserir_todos = ctk.CTkButton(
             self, text="Lançar todas no AdvWin", height=40, font=FONTE_BOTAO,
-            fg_color=COR_SUCESSO, hover_color=COR_SUCESSO_HOVER, command=self._inserir_todos,
+            fg_color=COR_PRIMARIA, hover_color=COR_PRIMARIA_HOVER, command=self._inserir_todos,
         )
         self.btn_inserir_todos.pack(fill="x", side="bottom", padx=16, pady=(0, 12))
 
@@ -639,8 +657,6 @@ class App(ctk.CTk):
             self._adicionar_card(estado.Timer())
         self._atualizar_total_horas()
 
-        self._instalador_pendente: Path | None = None
-
         # Ctrl+Espaço/Ctrl+N em vez de só Espaço: os cards têm campos de texto (descrição
         # etc.) onde a barra de espaço precisa continuar digitando um espaço normal.
         self.bind_all("<Control-space>", lambda e: self._atalho_play_pause())
@@ -649,7 +665,6 @@ class App(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._ao_fechar)
         self.after(1000, self._tick)
         self.after(30_000, self._checar_inatividade)
-        self.after(3000, self._checar_atualizacao)
 
     def _construir_relogio_total(self, master) -> ctk.CTkFrame:
         """Mostra o total de horas trabalhadas hoje, estilizado como um relógio digital."""
@@ -684,6 +699,10 @@ class App(ctk.CTk):
 
     def _advogado_mudou(self) -> None:
         self.advogado_atual = self.cb_advogado_geral.get()
+        self.salvar()
+
+    def _area_mudou(self, valor: str) -> None:
+        self.area_atual = valor
         self.salvar()
 
     def advogado_valido(self) -> bool:
@@ -738,15 +757,14 @@ class App(ctk.CTk):
             messagebox.showinfo("AdvWin", "Conectado com sucesso.")
 
     def _lancar_retroativo(self) -> None:
-        """Lê uma cópia preenchida da planilha de modelo e abre a prévia editável
+        """Lê uma ou mais cópias preenchidas da planilha de modelo e abre a prévia editável
         (retro_preview.JanelaRetroativa) antes de lançar qualquer coisa no AdvWin."""
         if not self.advogado_valido():
             return
-        resultado = retro_preview.selecionar_e_ler(self)
-        if resultado is None:
+        lotes = retro_preview.selecionar_e_ler_varias(self)
+        if not lotes:
             return
-        caminho, linhas = resultado
-        retro_preview.JanelaRetroativa(self, caminho, linhas, self.advogado_atual, self.pastas_favoritas)
+        retro_preview.JanelaRetroativa(self, lotes, self.advogado_atual, self.pastas_favoritas, self.area_atual)
 
     def novo_card(self) -> None:
         self._adicionar_card(estado.Timer())
@@ -761,7 +779,7 @@ class App(ctk.CTk):
         largura = self.scroll.winfo_width() - 24  # 24px de folga pra barra de rolagem interna
         if largura <= 1:  # janela ainda não desenhada (winfo_width não confiável)
             return 3
-        return max(1, largura // LARGURA_MIN_CARD)
+        return min(MAX_COLUNAS, max(1, largura // LARGURA_MIN_CARD))
 
     def _ao_redimensionar_cards(self, event) -> None:
         """Debounced: evita relayout a cada pixel arrastado ao redimensionar a janela."""
@@ -827,7 +845,7 @@ class App(ctk.CTk):
     def salvar(self) -> None:
         for card in self.cards:
             card._coletar_campos()
-        estado.salvar_estado([c.timer for c in self.cards], self.advogado_atual)
+        estado.salvar_estado([c.timer for c in self.cards], self.advogado_atual, self.area_atual)
         self.label_salvo.configure(text=f"Salvo às {datetime.now().strftime('%H:%M')}")
 
     def _tick(self) -> None:
@@ -847,36 +865,15 @@ class App(ctk.CTk):
             )
         self.after(30_000, self._checar_inatividade)
 
-    def _checar_atualizacao(self) -> None:
-        threading.Thread(target=self._checar_atualizacao_bg, daemon=True).start()
-
-    def _checar_atualizacao_bg(self) -> None:
-        info = atualizador.verificar_nova_versao()
-        if not info:
-            return
-        try:
-            self._instalador_pendente = atualizador.baixar_instalador(info["url"])
-        except OSError:
-            return
-        self.after(0, lambda: self._perguntar_atualizacao(info["versao"]))
-
-    def _perguntar_atualizacao(self, versao: str) -> None:
-        if not messagebox.askyesno(
-            "Atualização disponível",
-            f"Uma nova versão ({versao}) está disponível.\n\n"
-            "Instalar agora? O programa será fechado e reaberto automaticamente ao final.",
-        ):
-            return
-        self.salvar()
-        atualizador.instalar_silenciosamente(self._instalador_pendente)
-        self.destroy()
-
     def _ao_fechar(self) -> None:
         self.salvar()
-        if self._instalador_pendente is not None:
-            atualizador.instalar_silenciosamente(self._instalador_pendente)
         self.destroy()
 
 
 if __name__ == "__main__":
+    # sem isso, rodando via "python main.py" (fora do .exe empacotado) a barra de
+    # tarefas mostra o icone do python.exe em vez do icone da janela (iconbitmap
+    # so troca o icone do titulo/Alt+Tab; quem manda no icone da taskbar e o
+    # AppUserModelID do processo).
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("VLFAdvogados.FichaTempo")
     App().mainloop()

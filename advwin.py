@@ -17,7 +17,10 @@ import threading
 from caminhos import pasta_dados
 
 URL_DASHBOARD = "https://vlf.twtinfo.com.br/dashboard"
-URL_TRABALHISTA = "https://vlf.twtinfo.com.br/pasta/index/0/4"
+URLS_AREA = {
+    "Trabalhista": "https://vlf.twtinfo.com.br/pasta/index/0/4",
+    "Contencioso": "https://vlf.twtinfo.com.br/pasta/index/0/1",
+}
 PERFIL_CHROME = pasta_dados() / "advwin-chrome-profile"
 
 _playwright = None
@@ -41,7 +44,12 @@ def pagina_advwin():
         # nome sugere) - sem isso o Chrome roda com --no-sandbox e mostra o aviso "sinalizador
         # de linha de comando não suportado". Liga de volta o sandbox de verdade.
         _contexto = _playwright.chromium.launch_persistent_context(
-            str(PERFIL_CHROME), channel="chrome", headless=False, chromium_sandbox=True
+            str(PERFIL_CHROME),
+            channel="chrome",
+            headless=False,
+            chromium_sandbox=True,
+            args=["--start-maximized"],
+            no_viewport=True,
         )
 
     pagina = _contexto.pages[0] if _contexto.pages else _contexto.new_page()
@@ -108,17 +116,20 @@ def _hhmm(texto: str) -> str:
     return f"{int(horas):02d}:{int(minutos):02d}"
 
 
-def lancar_horas(pagina, pasta: str, data: str, descricao: str, horas_texto: str) -> None:
+def lancar_horas(pagina, pasta: str, data: str, descricao: str, horas_texto: str,
+                  area: str = "Trabalhista") -> None:
     """Busca a pasta pelo código e lança um registro na aba "Ficha-Tempo".
 
     `pagina` deve vir de pagina_advwin() (sessão já autenticada). `data` no formato
     dd/mm/aaaa, `horas_texto` no formato h:mm - mesmos formatos já usados no card.
+    `area` seleciona a listagem de pastas onde buscar ("Trabalhista" ou "Contencioso" -
+    ver URLS_AREA), já que o código da pasta só é único dentro de cada área.
     Preenche tanto "Horas" (TempoSimplificado) quanto "Horas Cobráveis" (Tempo) com o
     mesmo valor (horas cobráveis do card) - decisão confirmada com o usuário.
     Sequência confirmada ao vivo via Chrome DevTools MCP contra o DOM real autenticado.
     """
-    print(f'[advwin] buscando pasta "{pasta}" (data={data}, horas={horas_texto})')
-    pagina.goto(URL_TRABALHISTA)
+    print(f'[advwin] buscando pasta "{pasta}" (área={area}, data={data}, horas={horas_texto})')
+    pagina.goto(URLS_AREA[area])
     _esperar_rede_ociosa(pagina)
 
     pagina.locator("#campoTemplate").select_option("Codigo_Comp")
@@ -237,6 +248,7 @@ def _processar_fila() -> None:
 def _demo():
     assert PERFIL_CHROME.name == "advwin-chrome-profile"
     assert URL_DASHBOARD.startswith("https://")
+    assert set(URLS_AREA) == {"Trabalhista", "Contencioso"}
     assert re.sub(r"\D", "", "20/08/2026") == "20082026"
     assert _hhmm("0:15") == "00:15"
     assert _hhmm("1:05") == "01:05"
