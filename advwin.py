@@ -35,6 +35,17 @@ def pagina_advwin():
     chamada numa thread separada da UI (nunca direto no thread principal do Tkinter).
     """
     global _playwright, _contexto, _autenticado
+    if _contexto is not None:
+        try:
+            pagina = _contexto.pages[0] if _contexto.pages else _contexto.new_page()
+        except Exception:
+            # Contexto "morto" (ex.: usuário fechou a janela do Chrome da automação) -
+            # sem isso, reconectar reaproveitava o mesmo contexto inválido e falhava de
+            # novo silenciosamente, mesmo depois do usuário clicar em "Conectar AdvWin".
+            print("[advwin] sessão anterior não está mais disponível - reconectando...")
+            _contexto = None
+            _autenticado = False
+
     if _contexto is None:
         print("[advwin] abrindo Chrome (perfil de automação)...")
         from playwright.sync_api import sync_playwright
@@ -51,8 +62,8 @@ def pagina_advwin():
             args=["--start-maximized"],
             no_viewport=True,
         )
+        pagina = _contexto.pages[0] if _contexto.pages else _contexto.new_page()
 
-    pagina = _contexto.pages[0] if _contexto.pages else _contexto.new_page()
     if _autenticado:
         # Já confirmamos a sessão nesta execução - não repete o goto(dashboard) a cada
         # card do "Lançar todas". Achado ao vivo: o /dashboard do AdvWin redireciona
@@ -74,6 +85,11 @@ def pagina_advwin():
     print("[advwin] sessão autenticada")
     _autenticado = True
     return pagina
+
+
+def esta_conectado() -> bool:
+    """True se há uma sessão do AdvWin aberta e autenticada nesta execução."""
+    return _autenticado and _contexto is not None
 
 
 def _esperar_rede_ociosa(pagina) -> None:
@@ -116,6 +132,20 @@ def _hhmm(texto: str) -> str:
     return f"{int(horas):02d}:{int(minutos):02d}"
 
 
+def _garantir_coluna_acoes_visivel(pagina) -> None:
+    """A coluna "Ações" (onde fica o link Ficha-Tempo) é ocultável - preferência de grade
+    salva por usuário no AdvWin (grid DevExtreme). Confirmado ao vivo via Chrome DevTools
+    MCP: quando oculta, o link "Ficha-Tempo" nem existe no DOM (não é só invisível), então
+    a busca abaixo falharia com "Nenhuma pasta encontrada" mesmo a pasta existindo.
+    #idBtnHideActions é o botão de alternância dessa coluna especificamente - seu `title`
+    alterna entre "Ocultar Coluna Ações" (já visível) e "Exibir Coluna Ações" (oculta)."""
+    botao = pagina.locator("#idBtnHideActions")
+    if botao.count() and "exibir" in (botao.get_attribute("title") or "").lower():
+        print('[advwin] coluna "Ações" estava oculta - reabrindo...')
+        botao.click()
+        _esperar_rede_ociosa(pagina)
+
+
 def lancar_horas(pagina, pasta: str, data: str, descricao: str, horas_texto: str,
                   area: str = "Trabalhista") -> None:
     """Busca a pasta pelo código e lança um registro na aba "Ficha-Tempo".
@@ -149,16 +179,21 @@ def lancar_horas(pagina, pasta: str, data: str, descricao: str, horas_texto: str
     except Exception:
         pass
 
+    _garantir_coluna_acoes_visivel(pagina)
+
     # Mesma trava de segurança de core/advwin-actions.ts (findProcessInListing): zero ou
     # mais de um resultado aborta sem clicar em nada, em vez de arriscar lançar a hora na
     # pasta errada (defesa extra mesmo com operador "igual").
     # ponytail: a contagem é da página inteira, não só da linha da pasta - linhas de uma
     # busca anterior que ainda não sumiram do DOM podem inflar esse total e abortar um
-    # lançamento válido (falso positivo, força tentar de novo). Tentativa de escopar por
-    # linha (role="row") foi revertida: o link "Ficha-Tempo" não fica aninhado dentro da
-    # linha no DOM real, travava o clique até estourar timeout. Sem mapear a estrutura real
-    # (não dá pra inspecionar agora sem arriscar derrubar a sessão em teste), fica assim -
-    # aborta com segurança de mais a arriscar clicar na pasta errada.
+    # lançamento válido (falso positivo, força tentar de novo). Já foi tentado escopar por
+    # linha (role="row") - travava até estourar timeout. Reinspecionado ao vivo (2026-08-28):
+    # o link ESTÁ dentro de um <tr class="dx-row dx-data-row..."> real no DOM - a suposição
+    # anterior de que não ficava aninhado na linha estava errada. O locator role="row"
+    # provavelmente não bate por causa de como o DevExtreme monta a tabela (o role ARIA
+    # implícito do <tr> pode não ser computado do jeito que o Playwright espera); escopar
+    # por seletor CSS (ex. "tr.dx-data-row") em vez de role="row" é o próximo caminho a
+    # tentar - não feito agora por estar fora do escopo desta mudança.
     links_ficha_tempo = pagina.get_by_role("link", description="Ficha-Tempo", exact=True)
     total = links_ficha_tempo.count()
     print(f"[advwin] {total} resultado(s) de busca (encontrados: {_numero_encontrados(pagina)})")
@@ -249,6 +284,7 @@ def _demo():
     assert PERFIL_CHROME.name == "advwin-chrome-profile"
     assert URL_DASHBOARD.startswith("https://")
     assert set(URLS_AREA) == {"Trabalhista", "Contencioso"}
+    assert esta_conectado() is False
     assert re.sub(r"\D", "", "20/08/2026") == "20082026"
     assert _hhmm("0:15") == "00:15"
     assert _hhmm("1:05") == "01:05"

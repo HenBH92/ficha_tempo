@@ -252,6 +252,11 @@ class TimerCard(ctk.CTkFrame):
         self.btn_remover.pack(side="left", padx=2)
         Tooltip(self.btn_remover, "Remover")
 
+        self.label_status_advwin = ctk.CTkLabel(self, text="", anchor="w", justify="left",
+                                                  font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE,
+                                                  wraplength=260)
+        self.label_status_advwin.pack(fill="x", padx=12, pady=(0, 8))
+
         if timer.inserido:
             self.btn_inserir.configure(text="✓", image=None, state="disabled", fg_color=COR_SUCESSO_HOVER)
             self._definir_campos_travados(True)
@@ -269,6 +274,9 @@ class TimerCard(ctk.CTkFrame):
         else:
             cor = COR_FUNDO_CARD
         self.configure(fg_color=cor)
+
+    def _marcar_status_advwin(self, texto: str, cor: str) -> None:
+        self.label_status_advwin.configure(text=texto, text_color=cor)
 
     def _definir_campos_travados(self, travado: bool) -> None:
         """Bloqueia os campos do card enquanto o lançamento no AdvWin está em voo (evita
@@ -348,11 +356,15 @@ class TimerCard(ctk.CTkFrame):
     def _inserir(self, ao_concluir=None) -> None:
         """Lança este card no AdvWin (numa fila em segundo plano - a sessão do navegador
         é compartilhada entre cards) e, se der certo, registra a linha no log local.
-        `ao_concluir`, se passado, roda ao final (sucesso ou erro) - usado por "Lançar
-        todas" para acompanhar o progresso do lote."""
+        `ao_concluir`, se passado, roda ao final com um bool de sucesso - usado por
+        "Lançar todas" para acompanhar o progresso do lote. Nesse modo (em_lote=True),
+        erros não abrem popup - ficam só no status do próprio card, pra não empilhar um
+        messagebox bloqueante por card que falhar."""
+        em_lote = ao_concluir is not None
+        self._marcar_status_advwin("", COR_TEXTO_SUAVE)
         if not self.app.advogado_valido():
             if ao_concluir:
-                ao_concluir()
+                ao_concluir(False)
             return
 
         self._coletar_campos()
@@ -360,14 +372,20 @@ class TimerCard(ctk.CTkFrame):
         try:
             datetime.strptime(t.data, "%d/%m/%Y")
         except ValueError:
-            messagebox.showwarning("Data inválida", 'A data deve estar no formato dd/mm/aaaa (ex.: "14/08/2026").')
+            if em_lote:
+                self._marcar_status_advwin("✗ Data inválida (use dd/mm/aaaa).", COR_PERIGO)
+            else:
+                messagebox.showwarning("Data inválida", 'A data deve estar no formato dd/mm/aaaa (ex.: "14/08/2026").')
             if ao_concluir:
-                ao_concluir()
+                ao_concluir(False)
             return
         if not t.pasta:
-            messagebox.showwarning("Pasta obrigatória", "Preencha a Pasta antes de lançar no AdvWin.")
+            if em_lote:
+                self._marcar_status_advwin("✗ Pasta obrigatória.", COR_PERIGO)
+            else:
+                messagebox.showwarning("Pasta obrigatória", "Preencha a Pasta antes de lançar no AdvWin.")
             if ao_concluir:
-                ao_concluir()
+                ao_concluir(False)
             return
 
         if t.status != "parado":
@@ -395,9 +413,14 @@ class TimerCard(ctk.CTkFrame):
         if erro is not None:
             self.btn_inserir.configure(text="", image=icones.icone("inserir", cor="white"), state="normal")
             self._definir_campos_travados(False)
-            messagebox.showerror("AdvWin", f"Não foi possível lançar no AdvWin:\n{advwin.mensagem_amigavel(erro)}")
+            mensagem = advwin.mensagem_amigavel(erro)
             if ao_concluir:
-                ao_concluir()
+                self._marcar_status_advwin(f"✗ {mensagem}", COR_PERIGO)
+            else:
+                messagebox.showerror("AdvWin", f"Não foi possível lançar no AdvWin:\n{mensagem}")
+            self.app._atualizar_botao_advwin()
+            if ao_concluir:
+                ao_concluir(False)
             return
 
         t = self.timer
@@ -422,8 +445,9 @@ class TimerCard(ctk.CTkFrame):
         self.btn_inserir.configure(text="✓", image=None, state="disabled", fg_color=COR_SUCESSO_HOVER)
         self._atualizar_cor_card()
         self.app.salvar()
+        self.app._atualizar_botao_advwin()
         if ao_concluir:
-            ao_concluir()
+            ao_concluir(True)
 
     def _remover(self) -> None:
         if self.timer.fixado:
@@ -740,6 +764,22 @@ class App(ctk.CTk):
         self._relayout_cards()
         self.salvar()
 
+    def _atualizar_botao_advwin(self) -> None:
+        """Reflete no botão o último estado conhecido da sessão do AdvWin - atualizado a
+        cada tentativa real de uso (conectar, inserir card, lote retroativo), sem polling."""
+        if advwin.esta_conectado():
+            self.btn_conectar_advwin.configure(
+                text="Conectado", state="normal",
+                fg_color=COR_SUCESSO, border_color=COR_SUCESSO,
+                text_color="white", hover_color=COR_SUCESSO_HOVER,
+            )
+        else:
+            self.btn_conectar_advwin.configure(
+                text="Conectar AdvWin", state="normal",
+                fg_color="transparent", border_color=COR_PRIMARIA,
+                text_color=COR_PRIMARIA, hover_color="white",
+            )
+
     def _conectar_advwin(self) -> None:
         """Abre a sessão do AdvWin (perfil próprio de automação; pode pedir login manual
         na primeira vez), pela mesma fila usada pelos lançamentos por card."""
@@ -750,7 +790,7 @@ class App(ctk.CTk):
         self.after(0, lambda: self._apos_conectar_advwin_ui(erro))
 
     def _apos_conectar_advwin_ui(self, erro: Exception | None) -> None:
-        self.btn_conectar_advwin.configure(text="Conectar AdvWin", state="normal")
+        self._atualizar_botao_advwin()
         if erro is not None:
             messagebox.showerror("AdvWin", f"Não foi possível conectar ao AdvWin:\n{advwin.mensagem_amigavel(erro)}")
         else:
@@ -823,18 +863,35 @@ class App(ctk.CTk):
         pendentes = [c for c in self.cards if not c.timer.inserido]
         if not pendentes:
             return
+        self._lote_pendentes = pendentes
         self._lote_total = len(pendentes)
         self._lote_concluidos = 0
+        self._lote_erros = 0
         self.btn_inserir_todos.configure(text=f"Lançando... 0/{self._lote_total}", state="disabled")
         for card in pendentes:
             card._inserir(self._apos_item_lote)
 
-    def _apos_item_lote(self) -> None:
+    def _apos_item_lote(self, sucesso: bool) -> None:
         self._lote_concluidos += 1
+        if not sucesso:
+            self._lote_erros += 1
         if self._lote_concluidos < self._lote_total:
-            self.btn_inserir_todos.configure(text=f"Lançando... {self._lote_concluidos}/{self._lote_total}")
+            texto = f"Lançando... {self._lote_concluidos}/{self._lote_total}"
+            if self._lote_erros:
+                texto += f" ({self._lote_erros} com erro)"
+            self.btn_inserir_todos.configure(text=texto)
         else:
             self.btn_inserir_todos.configure(text="Lançar todas no AdvWin", state="normal")
+            if self._lote_erros:
+                log = "\n".join(
+                    f"{c.cb_pasta.get().strip() or '(sem pasta)'}: {c.label_status_advwin.cget('text') or '✓ lançado'}"
+                    for c in self._lote_pendentes
+                )
+                messagebox.showinfo(
+                    "Lançamento no AdvWin concluído",
+                    f"{self._lote_total - self._lote_erros} lançada(s) com sucesso, "
+                    f"{self._lote_erros} com erro.\n\n{log}",
+                )
 
     def remover_card(self, card: TimerCard) -> None:
         self.cards.remove(card)

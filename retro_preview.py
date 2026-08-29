@@ -359,6 +359,7 @@ class JanelaRetroativa(ctk.CTkToplevel):
             self._erros += 1
             self.after(0, lp.marcar_status, f"✗ {mensagem}", COR_PERIGO)
 
+        self.after(0, self.master._atualizar_botao_advwin)
         concluidos = self._ok + self._erros
         self.after(0, self._atualizar_resumo, concluidos)
         if concluidos == self._total:
