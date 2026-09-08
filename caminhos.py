@@ -1,10 +1,11 @@
 """Caminhos de recursos (empacotados no exe, somente leitura) e de dados (graváveis, por usuário)."""
 import os
+import json
 import sys
 from pathlib import Path
 
 NOME_APP = "VLF Ficha de Tempo"
-VERSAO = "1.0.0"  # bump a cada release; deve bater com a tag do GitHub (ex.: tag "v1.0.1" -> VERSAO "1.0.1")
+APP_ID = "VLFAdvogados.FichaTempo"
 
 
 def pasta_recursos() -> Path:
@@ -19,3 +20,13 @@ def pasta_dados() -> Path:
     base = Path(os.getenv("APPDATA", Path.home())) / NOME_APP
     base.mkdir(parents=True, exist_ok=True)
     return base
+
+
+def informacoes_build() -> dict:
+    arquivo = pasta_recursos() / "build-info.json"
+    if arquivo.exists():
+        return json.loads(arquivo.read_text(encoding="utf-8-sig"))
+    return {"versao": "1.0.0", "commit": "desenvolvimento"}
+
+
+VERSAO = informacoes_build()["versao"]

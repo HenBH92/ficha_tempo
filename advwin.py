@@ -10,9 +10,8 @@ Chrome que o usuário já está usando. A alternativa (anexar via --remote-debug
 no navegador que o usuário já tem aberto) exigiria configurar com antecedência o jeito
 como o navegador é aberto em cada computador do escritório, o que não é viável.
 """
-import queue
 import re
-import threading
+from fila_trabalho import FilaTrabalho
 
 from caminhos import pasta_dados
 
@@ -244,40 +243,43 @@ def mensagem_amigavel(erro: Exception) -> str:
     return texto
 
 
-_fila = queue.Queue()
-_worker = None
+_trabalhos = FilaTrabalho()
 
 
-def enfileirar(job, ao_concluir) -> None:
+def enfileirar(job, ao_concluir, despachar=None) -> None:
     """Executa `job()` numa fila de fundo, um de cada vez - a sessão do AdvWin (a página
     do Playwright) é compartilhada e não é segura pra usar de mais de uma thread ao mesmo
     tempo. Chama `ao_concluir(resultado, erro)` ao final, na própria thread de fundo (quem
     chamar precisa fazer o `self.after(0, ...)` pra mexer na UI a partir daí)."""
-    global _worker
-    if _worker is None:
-        _worker = threading.Thread(target=_processar_fila, daemon=True)
-        _worker.start()
-    _fila.put((job, ao_concluir))
+    _trabalhos.enfileirar(job, ao_concluir, despachar)
 
 
-def _processar_fila() -> None:
-    """O loop precisa sobreviver a qualquer exceção - inclusive dentro de `ao_concluir`
-    (achado ao vivo: um erro ao gravar o log local matou essa thread, e como só existe um
-    worker pra fila inteira, todo lançamento seguinte - inclusive por card - ficava
-    pendurado pra sempre sem nenhum aviso)."""
-    while True:
-        job, ao_concluir = _fila.get()
-        try:
-            resultado = job()
-        except Exception as e:
-            print(f"[advwin] ERRO: {e!r}")
-            resultado, erro = None, e
-        else:
-            erro = None
-        try:
-            ao_concluir(resultado, erro)
-        except Exception as e:
-            print(f"[advwin] ERRO no callback ao_concluir: {e!r}")
+def esta_ocupado() -> bool:
+    return _trabalhos.ocupada
+
+
+def bloquear_para_atualizacao() -> bool:
+    return _trabalhos.bloquear_se_ociosa()
+
+
+def cancelar_encerramento() -> None:
+    _trabalhos.desbloquear()
+
+
+def _fechar_sessao() -> None:
+    """Executada pelo mesmo worker que criou o Playwright e o contexto Chrome."""
+    global _playwright, _contexto, _autenticado
+    try:
+        if _contexto is not None:
+            _contexto.close()
+    finally:
+        if _playwright is not None:
+            _playwright.stop()
+        _playwright, _contexto, _autenticado = None, None, False
+
+
+def encerrar_sessao(ao_concluir, despachar) -> None:
+    _trabalhos.encerrar(_fechar_sessao, ao_concluir, despachar)
 
 
 def _demo():

@@ -1,3 +1,6 @@
+; DESCONTINUADO: mantido apenas como historico do instalador Inno Setup.
+; Novos builds usam scripts/build.ps1 e Velopack; veja docs/distribuicao.md.
+; Os comandos e a versao abaixo descrevem somente o fluxo antigo.
 ; Script do Inno Setup para gerar o instalador do VLF Ficha de Tempo.
 ; Requer o Inno Setup (compilador ISCC) - baixar em https://jrsoftware.org/isdl.php
 ;

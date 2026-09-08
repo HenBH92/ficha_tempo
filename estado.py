@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, asdict, fields
 from datetime import datetime
 
 from caminhos import pasta_dados
+from persistencia import gravar_json_atomico
 
 ARQUIVO_ESTADO = pasta_dados() / "estado.json"
 
@@ -51,16 +52,21 @@ class Timer:
         self.status = "parado"
 
 
-def salvar_estado(timers: list[Timer], advogado_atual: str = "", area_atual: str = "Trabalhista") -> None:
+def salvar_estado(timers: list[Timer], advogado_atual: str = "", area_atual: str = "Trabalhista",
+                  retomada_atualizacao: bool = False) -> None:
     conteudo = {
         "advogado_atual": advogado_atual,
         "area_atual": area_atual,
         "timers": [asdict(t) for t in timers],
+        "retomada_atualizacao": retomada_atualizacao,
     }
-    ARQUIVO_ESTADO.write_text(
-        json.dumps(conteudo, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    gravar_json_atomico(ARQUIVO_ESTADO, conteudo)
+
+
+def retomada_pendente() -> bool:
+    if not ARQUIVO_ESTADO.exists():
+        return False
+    return json.loads(ARQUIVO_ESTADO.read_text(encoding="utf-8")).get("retomada_atualizacao", False) is True
 
 
 def carregar_estado() -> tuple[list[Timer], str, str]:

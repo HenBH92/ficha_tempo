@@ -1,0 +1,76 @@
+name: Preparar release Windows (rascunho)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versao estavel X.Y.Z (ex.: 1.0.1)'
+        required: true
+        type: string
+      notes:
+        description: 'Notas da versao em Markdown'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ficha-tempo-release-draft
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14.0'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Instalar dependencias fixadas
+        run: |
+          python -m pip install -r requirements-build.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Instalacao de dependencias falhou.' }
+      - name: Testes sem acesso ao AdvWin
+        run: |
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Testes falharam.' }
+      - name: Gerar executavel e pacotes completos
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+        run: |
+          $notas = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          [IO.File]::WriteAllText($notas, $env:RELEASE_NOTES, [Text.UTF8Encoding]::new($false))
+          & .\scripts\build.ps1 -Version $env:RELEASE_VERSION -NotesFile $notas -Python (Get-Command python).Source
+      - name: Guardar pacotes e manifesto para revisao
+        uses: actions/upload-artifact@v4
+        with:
+          name: ficha-tempo-windows
+          if-no-files-found: error
+          path: |
+            build/releases/*/Releases/*
+            build/releases/*/metadata/*
+      - name: Criar somente rascunho no repositorio de distribuicao
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          VPK_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:VPK_TOKEN)) { throw 'Configure o secret RELEASES_TOKEN.' }
+          $pacotes = Join-Path $env:GITHUB_WORKSPACE "build/releases/$env:RELEASE_VERSION/Releases"
+          dotnet tool run vpk -- upload github --repoUrl 'https://github.com/HenBH92/ficha_tempo-releases' --outputDir $pacotes --channel win --tag "v$env:RELEASE_VERSION" --releaseName "Ficha de Tempo VLF $env:RELEASE_VERSION" --publish false --pre false --merge false
+          if ($LASTEXITCODE -ne 0) { throw 'Criacao do rascunho falhou.' }

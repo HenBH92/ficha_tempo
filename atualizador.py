@@ -1,69 +1,113 @@
-"""Checagem e instalação silenciosa de atualizações via GitHub Releases."""
+"""Atualizações opcionais: consulta, download e aplicação são ações separadas."""
 import json
-import subprocess
-import tempfile
-import urllib.error
-import urllib.request
+import logging
+import re
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-from caminhos import VERSAO
+from caminhos import APP_ID, pasta_dados
+from persistencia import gravar_json_atomico
 
-REPO = "HenBH92/ficha_tempo"
-URL_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
-
-
-def _versao_para_tupla(versao: str) -> tuple[int, ...]:
-    partes = []
-    for parte in versao.strip().lstrip("vV").split("."):
-        try:
-            partes.append(int(parte))
-        except ValueError:
-            break
-    return tuple(partes)
+REPO_URL = "https://github.com/HenBH92/ficha_tempo-releases"
+INTERVALO_MS = 4 * 60 * 60 * 1000
+log = logging.getLogger(__name__)
 
 
-def verificar_nova_versao() -> dict | None:
-    """Consulta a última release no GitHub. Retorna {"versao", "url"} se houver algo mais novo, senão None.
-    Qualquer falha (sem internet, repo ainda não existe, GitHub fora do ar) é silenciosa: apenas não atualiza."""
+class NaoInstalado(RuntimeError):
+    pass
+
+
+def criar_gerenciador():
+    if not getattr(sys, "frozen", False):
+        raise NaoInstalado("As atualizações estão disponíveis na versão instalada do programa.")
+    import velopack
     try:
-        with urllib.request.urlopen(URL_LATEST, timeout=6) as resp:
-            dados = json.loads(resp.read())
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        gerente = velopack.UpdateManager(
+            velopack.GithubSource(REPO_URL, prerelease=False),
+            velopack.UpdateOptions(AllowVersionDowngrade=False, MaximumDeltasBeforeFallback=-1),
+        )
+        if gerente.get_is_portable() or gerente.get_app_id() != APP_ID:
+            raise NaoInstalado("Instale o programa pelo instalador para receber atualizações.")
+        return gerente
+    except NaoInstalado:
+        raise
+    except Exception as erro:
+        raise NaoInstalado("Não foi possível identificar a instalação do programa.") from erro
+
+
+def _versao_estavel(texto):
+    if not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", texto):
         return None
-
-    tag = dados.get("tag_name", "")
-    if _versao_para_tupla(tag) <= _versao_para_tupla(VERSAO):
-        return None
-
-    asset = next((a for a in dados.get("assets", []) if a["name"].lower().endswith(".exe")), None)
-    if not asset:
-        return None
-    return {"versao": tag, "url": asset["browser_download_url"]}
+    return tuple(map(int, texto.split(".")))
 
 
-def baixar_instalador(url: str) -> Path:
-    destino = Path(tempfile.gettempdir()) / "VLF-FichaDeTempo-Update.exe"
-    urllib.request.urlretrieve(url, destino)
-    return destino
+@dataclass
+class NovaVersao:
+    versao: str
+    notas: str
+    pacote: object
+    baixada: bool = False
 
 
-def instalar_silenciosamente(caminho_instalador: Path) -> None:
-    """Roda o instalador em segundo plano: ele fecha o app, atualiza os arquivos e reabre sozinho."""
-    subprocess.Popen(
-        [str(caminho_instalador), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
-         "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"],
-        close_fds=True,
-    )
+class ServicoAtualizacao:
+    """Chamadas de rede são síncronas; o controlador as executa fora do Tkinter."""
 
+    def __init__(self, pasta: Path | None = None, fabrica=criar_gerenciador):
+        self.pasta = pasta if pasta is not None else pasta_dados()
+        self.arquivo = self.pasta / "atualizador.json"
+        self.fabrica = fabrica
+        self._gerente = None
+        self.ignorada = ""
+        try:
+            dados = json.loads(self.arquivo.read_text(encoding="utf-8"))
+            if isinstance(dados, dict):
+                self.ignorada = dados.get("versao_ignorada", "")
+        except (OSError, ValueError):
+            pass
 
-def _demo():
-    assert _versao_para_tupla("v1.2.10") == (1, 2, 10)
-    assert _versao_para_tupla("1.2.10") > _versao_para_tupla("1.2.9")
-    assert _versao_para_tupla("1.10.0") > _versao_para_tupla("1.9.0")
-    assert _versao_para_tupla("lixo") == ()
-    assert verificar_nova_versao() is None  # repo placeholder não existe -> falha silenciosa
-    print("atualizador.py OK")
+    @property
+    def gerente(self):
+        if self._gerente is None:
+            self._gerente = self.fabrica()
+        return self._gerente
 
+    def _nova(self, pacote, baixada=False):
+        alvo = pacote if baixada else pacote.TargetFullRelease
+        versao = _versao_estavel(alvo.Version)
+        atual = _versao_estavel(self.gerente.get_current_version())
+        if (not versao or not atual or versao <= atual or alvo.PackageId != APP_ID
+                or (not baixada and pacote.IsDowngrade)):
+            return None
+        return NovaVersao(alvo.Version, alvo.NotesMarkdown or "Melhorias e correções.", pacote, baixada)
 
-if __name__ == "__main__":
-    _demo()
+    def verificar(self, manual=False):
+        pendente = self.gerente.get_update_pending_restart()
+        nova_pendente = self._nova(pendente, True) if pendente else None
+        try:
+            info = self.gerente.check_for_updates()
+        except Exception:
+            if nova_pendente is None:
+                raise
+            log.info("Consulta indisponível; oferecendo pacote já baixado.", exc_info=True)
+            info = None
+        nova = self._nova(info) if info else None
+        if nova_pendente and (nova is None or _versao_estavel(nova_pendente.versao) >= _versao_estavel(nova.versao)):
+            nova = nova_pendente
+        if nova and not manual and nova.versao == self.ignorada:
+            return None
+        return nova
+
+    def ignorar(self, versao):
+        gravar_json_atomico(self.arquivo, {"versao_ignorada": versao})
+        self.ignorada = versao
+
+    def baixar(self, nova, progresso=None):
+        if not nova.baixada:
+            self.gerente.download_updates(nova.pacote, progress_callback=progresso)
+            nova.baixada = True
+
+    def preparar_instalacao(self, nova):
+        if not nova.baixada:
+            raise RuntimeError("A atualização ainda não terminou de baixar.")
+        self.gerente.wait_exit_then_apply_updates(nova.pacote, silent=False, restart=True)

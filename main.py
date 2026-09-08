@@ -1,6 +1,15 @@
 """App de ficha de tempo: múltiplos cronômetros -> linhas na planilha diária do AdvWin."""
+# O instalador pode executar este processo apenas para hooks: nada da UI antes disso.
+if __name__ == "__main__":
+    from inicializacao import iniciar_velopack, diagnosticar_se_solicitado, configurar_logs, garantir_instancia_unica
+    iniciar_velopack()
+    diagnosticar_se_solicitado()
+    garantir_instancia_unica()
+    configurar_logs()
+
 import ctypes
 import math
+import queue
 from datetime import datetime, timedelta
 from tkinter import messagebox
 
@@ -14,7 +23,8 @@ import icones
 import modelos
 import planilha
 import retro_preview
-from caminhos import pasta_recursos
+from caminhos import pasta_recursos, VERSAO
+from atualizacao_ui import ControladorAtualizacao
 from cores import (
     COR_BORDA_CARD,
     COR_CARD_INSERIDO,
@@ -336,6 +346,8 @@ class TimerCard(ctk.CTkFrame):
         self.entry_horas_cobraveis.insert(0, texto)
 
     def _iniciar(self) -> None:
+        if self.app._encerrando:
+            return
         self.timer.iniciar()
         self._atualizar_cor_card()
         self.app.salvar()
@@ -360,6 +372,8 @@ class TimerCard(ctk.CTkFrame):
         "Lançar todas" para acompanhar o progresso do lote. Nesse modo (em_lote=True),
         erros não abrem popup - ficam só no status do próprio card, pra não empilhar um
         messagebox bloqueante por card que falhar."""
+        if self.app._encerrando:
+            return
         em_lote = ao_concluir is not None
         self._marcar_status_advwin("", COR_TEXTO_SUAVE)
         if not self.app.advogado_valido():
@@ -403,7 +417,8 @@ class TimerCard(ctk.CTkFrame):
         area = self.app.area_atual
         advwin.enfileirar(
             lambda: advwin.lancar_horas(advwin.pagina_advwin(), pasta, data, descricao, horas_texto, area),
-            lambda resultado, erro: self._apos_inserir_advwin(erro, ao_concluir),
+            lambda resultado, erro: self._apos_inserir_advwin_ui(erro, ao_concluir),
+            despachar=self.app.agendar_ui,
         )
 
     def _apos_inserir_advwin(self, erro, ao_concluir) -> None:
@@ -498,6 +513,9 @@ class TimerCard(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
+        self._encerrando = False
+        self._destruida = False
+        self._eventos_ui = queue.Queue()
         self.title("VLF Advogados - Ficha de Tempo")
         self.geometry("1040x640")
         self.minsize(860, 560)
@@ -516,8 +534,9 @@ class App(ctk.CTk):
         self.area_atual = area_atual
 
         hoje = datetime.now().strftime("%d/%m/%Y")
+        retomando = estado.retomada_pendente()
         for t in timers:
-            if t.fixado:
+            if t.fixado and not retomando:
                 t.data = hoje
                 t.status = "parado"
                 t.acumulado_s = 0.0
@@ -652,6 +671,9 @@ class App(ctk.CTk):
         self.rodape.pack_propagate(False)
         self.label_salvo = ctk.CTkLabel(self.rodape, text="", font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE)
         self.label_salvo.pack(side="right", padx=16)
+        ctk.CTkButton(self.rodape, text=f"v{VERSAO} · Verificar atualizações", height=22,
+                       fg_color="transparent", text_color=COR_TEXTO_SUAVE,
+                       command=lambda: self.atualizacoes.verificar(manual=True)).pack(side="left", padx=12)
 
         self.btn_inserir_todos = ctk.CTkButton(
             self, text="Lançar todas no AdvWin", height=40, font=FONTE_BOTAO,
@@ -689,6 +711,41 @@ class App(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._ao_fechar)
         self.after(1000, self._tick)
         self.after(30_000, self._checar_inatividade)
+        self.after(50, self._processar_eventos_ui)
+        self.atualizacoes = ControladorAtualizacao(self, advwin)
+        if retomando:
+            self.salvar()  # Consome a retomada somente após reconstruir a interface.
+
+    def agendar_ui(self, callback) -> None:
+        if not self._destruida:
+            self._eventos_ui.put(callback)
+
+    def _processar_eventos_ui(self) -> None:
+        for _ in range(100):
+            try:
+                callback = self._eventos_ui.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                callback()
+            except Exception as erro:
+                self.report_callback_exception(type(erro), erro, erro.__traceback__)
+            if self._destruida:
+                return
+        self.after(50, self._processar_eventos_ui)
+
+    def tem_previa_aberta(self) -> bool:
+        return any(isinstance(w, retro_preview.JanelaRetroativa) and w.winfo_exists()
+                   for w in self.winfo_children())
+
+    def destroy(self):
+        self._destruida = True
+        # Destruir os Toplevels explicitamente antes do root evita um TclError do
+        # customtkinter (CTkTextbox) quando a destruição em cascata do Tk os alcança primeiro.
+        for filho in list(self.winfo_children()):
+            if isinstance(filho, ctk.CTkToplevel) and filho.winfo_exists():
+                filho.destroy()
+        super().destroy()
 
     def _construir_relogio_total(self, master) -> ctk.CTkFrame:
         """Mostra o total de horas trabalhadas hoje, estilizado como um relógio digital."""
@@ -783,8 +840,11 @@ class App(ctk.CTk):
     def _conectar_advwin(self) -> None:
         """Abre a sessão do AdvWin (perfil próprio de automação; pode pedir login manual
         na primeira vez), pela mesma fila usada pelos lançamentos por card."""
+        if self._encerrando:
+            return
         self.btn_conectar_advwin.configure(text="Aguardando login...", state="disabled")
-        advwin.enfileirar(advwin.pagina_advwin, self._apos_conectar_advwin)
+        advwin.enfileirar(advwin.pagina_advwin,
+                         lambda resultado, erro: self._apos_conectar_advwin_ui(erro), self.agendar_ui)
 
     def _apos_conectar_advwin(self, resultado, erro) -> None:
         self.after(0, lambda: self._apos_conectar_advwin_ui(erro))
@@ -799,7 +859,7 @@ class App(ctk.CTk):
     def _lancar_retroativo(self) -> None:
         """Lê uma ou mais cópias preenchidas da planilha de modelo e abre a prévia editável
         (retro_preview.JanelaRetroativa) antes de lançar qualquer coisa no AdvWin."""
-        if not self.advogado_valido():
+        if self._encerrando or not self.advogado_valido():
             return
         lotes = retro_preview.selecionar_e_ler_varias(self)
         if not lotes:
@@ -807,6 +867,8 @@ class App(ctk.CTk):
         retro_preview.JanelaRetroativa(self, lotes, self.advogado_atual, self.pastas_favoritas, self.area_atual)
 
     def novo_card(self) -> None:
+        if self._encerrando:
+            return
         self._adicionar_card(estado.Timer())
         self.salvar()
 
@@ -858,7 +920,7 @@ class App(ctk.CTk):
         self.btn_tema.configure(image=icones.icone("sol" if novo_modo == "Dark" else "lua", cor=COR_ICONE_NEUTRO))
 
     def _inserir_todos(self) -> None:
-        if not self.advogado_valido():
+        if self._encerrando or not self.advogado_valido():
             return
         pendentes = [c for c in self.cards if not c.timer.inserido]
         if not pendentes:
@@ -899,10 +961,11 @@ class App(ctk.CTk):
         self._relayout_cards()
         self.salvar()
 
-    def salvar(self) -> None:
+    def salvar(self, retomada_atualizacao=False) -> None:
         for card in self.cards:
             card._coletar_campos()
-        estado.salvar_estado([c.timer for c in self.cards], self.advogado_atual, self.area_atual)
+        estado.salvar_estado([c.timer for c in self.cards], self.advogado_atual, self.area_atual,
+                             retomada_atualizacao=retomada_atualizacao)
         self.label_salvo.configure(text=f"Salvo às {datetime.now().strftime('%H:%M')}")
 
     def _tick(self) -> None:
@@ -912,6 +975,9 @@ class App(ctk.CTk):
         self.after(1000, self._tick)
 
     def _checar_inatividade(self) -> None:
+        if self._encerrando:
+            self.after(30_000, self._checar_inatividade)
+            return
         ativos = [c for c in self.cards if c.timer.status == "rodando"]
         if ativos and _segundos_sem_atividade() >= LIMITE_INATIVIDADE_S:
             for card in ativos:
@@ -923,8 +989,34 @@ class App(ctk.CTk):
         self.after(30_000, self._checar_inatividade)
 
     def _ao_fechar(self) -> None:
-        self.salvar()
-        self.destroy()
+        if self._encerrando:
+            return
+        if advwin.esta_ocupado():
+            messagebox.showwarning("AdvWin", "Aguarde a conclusão das operações do AdvWin antes de fechar.")
+            return
+        if self.tem_previa_aberta():
+            messagebox.showwarning("Lançamento retroativo", "Feche a prévia antes de encerrar o programa.")
+            return
+        if not advwin.bloquear_para_atualizacao():
+            return
+        try:
+            self.salvar()
+        except Exception as erro:
+            advwin.cancelar_encerramento()
+            messagebox.showerror("Salvar", f"Não foi possível salvar. O programa continuará aberto.\n{erro}")
+            return
+        self._encerrando = True
+        self.attributes("-disabled", True)
+        def encerrado(resultado, erro):
+            if erro is not None:
+                self._encerrando = False
+                self.attributes("-disabled", False)
+                advwin.cancelar_encerramento()
+                messagebox.showerror("AdvWin", f"Não foi possível encerrar a sessão:\n{erro}")
+                return
+            self.atualizacoes.parar()
+            self.destroy()
+        advwin.encerrar_sessao(encerrado, self.agendar_ui)
 
 
 if __name__ == "__main__":
