@@ -167,6 +167,14 @@ class TimerCard(ctk.CTkFrame):
         linha1 = ctk.CTkFrame(self, fg_color="transparent")
         linha1.pack(fill="x", padx=12, pady=(10, 3))
 
+        # Seleção é transitória (não vai pro estado.json): serve só pras ações em lote da
+        # barra do topo. pady alinha a caixinha com o campo, não com o rótulo do _bloco.
+        self.var_selecionado = ctk.BooleanVar(value=False)
+        self.chk_selecionar = ctk.CTkCheckBox(linha1, text="", width=20, variable=self.var_selecionado,
+                                               command=app._atualizar_barra_selecao)
+        self.chk_selecionar.pack(side="left", padx=(0, 8), pady=(14, 0))
+        Tooltip(self.chk_selecionar, "Selecionar este card (para duplicar em lote)")
+
         bloco_data = _bloco(linha1, "Data")
         bloco_data.pack(side="left", padx=(0, 6))
         self.entry_data = ctk.CTkEntry(bloco_data, width=90, placeholder_text="dd/mm/aaaa")
@@ -486,6 +494,7 @@ class TimerCard(ctk.CTkFrame):
 
     def resetar(self) -> None:
         self.timer = estado.Timer()
+        self.var_selecionado.set(False)
         self._definir_campos_travados(False)
         self.entry_data.delete(0, "end")
         self.entry_data.insert(0, datetime.now().strftime("%d/%m/%Y"))
@@ -621,6 +630,23 @@ class App(ctk.CTk):
             linha_acoes, text="+ Novo cronômetro", width=170, height=40, font=FONTE_BOTAO,
             fg_color=COR_PRIMARIA, text_color="white",
             hover_color=COR_PRIMARIA_HOVER, command=self.novo_card))
+        self.var_selecionar_todos = ctk.BooleanVar(value=False)
+        linha_acoes.adicionar(ctk.CTkCheckBox(
+            linha_acoes, text="Selecionar todos", width=145, height=32, font=FONTE_BOTAO_SECUNDARIO,
+            variable=self.var_selecionar_todos, command=self._alternar_selecionar_todos))
+        # Largura fixa de propósito: _BarraFluida mede winfo_reqwidth() dos itens, e um texto
+        # que cresce com o contador refluiria a barra inteira a cada clique num checkbox.
+        self.btn_duplicar = ctk.CTkButton(
+            linha_acoes, text="Duplicar selecionados", width=200, height=32, font=FONTE_BOTAO_SECUNDARIO,
+            fg_color="transparent", border_width=1,
+            border_color=COR_PRIMARIA, text_color=COR_PRIMARIA, hover_color="white",
+            state="disabled", command=self._duplicar_selecionados,
+        )
+        linha_acoes.adicionar(self.btn_duplicar)
+        Tooltip(self.btn_duplicar,
+                "Cria uma cópia de cada card marcado, ao lado do original, com a mesma Pasta, "
+                "Descrição e Data - cronômetro zerado e ainda não lançado no AdvWin.")
+
         linha_acoes.adicionar(ctk.CTkButton(
             linha_acoes, text="Limpar tudo", width=130, height=32, font=FONTE_BOTAO_SECUNDARIO,
             fg_color="transparent", border_width=1,
@@ -688,6 +714,7 @@ class App(ctk.CTk):
         self.cards_frame.pack(fill="x")
         self._colunas_configuradas = 0
         self._job_redimensionar: str | None = None
+        self._ultima_largura_scroll = 0
         # Mede/observa self.scroll (largura fixada de fora, pelo layout da janela) - não
         # cards_frame, cuja própria largura pedida depende de quantas colunas o grid interno
         # tem (referência circular: encolhia a janela, mas a largura medida não acompanhava).
@@ -698,9 +725,10 @@ class App(ctk.CTk):
 
         self.cards: list[TimerCard] = []
         for timer in timers:
-            self._adicionar_card(timer)
+            self._adicionar_card(timer, relayout=False)
         if not self.cards:
-            self._adicionar_card(estado.Timer())
+            self._adicionar_card(estado.Timer(), relayout=False)
+        self._relayout_cards()
         self._atualizar_total_horas()
 
         # Ctrl+Espaço/Ctrl+N em vez de só Espaço: os cards têm campos de texto (descrição
@@ -801,6 +829,7 @@ class App(ctk.CTk):
         for card in self.cards:
             if not card.timer.fixado:
                 card.resetar()
+        self._atualizar_barra_selecao()
         self.salvar()
 
     def _excluir_tudo(self) -> None:
@@ -818,6 +847,7 @@ class App(ctk.CTk):
             else:
                 card.destroy()
         self.cards = restantes
+        self._atualizar_barra_selecao()
         self._relayout_cards()
         self.salvar()
 
@@ -872,32 +902,103 @@ class App(ctk.CTk):
         self._adicionar_card(estado.Timer())
         self.salvar()
 
-    def _adicionar_card(self, timer: estado.Timer) -> None:
+    def _adicionar_card(self, timer: estado.Timer, posicao: int | None = None, relayout: bool = True) -> None:
+        """`posicao` insere o card no meio da lista (usado pela duplicação, pro clone nascer
+        ao lado do original); `relayout=False` evita o custo O(n²) de regridar a grade
+        inteira a cada card quando vários são criados de uma vez."""
         card = TimerCard(self.cards_frame, self, timer)
-        self.cards.append(card)
+        if posicao is None:
+            self.cards.append(card)
+        else:
+            self.cards.insert(posicao, card)
+        if relayout:
+            self._relayout_cards()
+
+    def _atualizar_barra_selecao(self) -> None:
+        selecionados = sum(1 for c in self.cards if c.var_selecionado.get())
+        self.btn_duplicar.configure(
+            text=f"Duplicar selecionados ({selecionados})" if selecionados else "Duplicar selecionados",
+            state="normal" if selecionados else "disabled",
+        )
+        if not selecionados:
+            self.var_selecionar_todos.set(False)
+
+    def _alternar_selecionar_todos(self) -> None:
+        valor = self.var_selecionar_todos.get()
+        for card in self.cards:
+            card.var_selecionado.set(valor)
+        self._atualizar_barra_selecao()
+
+    def _duplicar_selecionados(self) -> None:
+        """Clona cada card marcado logo ao lado do original, copiando só Pasta, Descrição e
+        Data - o clone nasce com cronômetro zerado, destravado e não lançado (defaults do
+        estado.Timer)."""
+        if self._encerrando:
+            return
+        selecionados = [c for c in self.cards if c.var_selecionado.get()]
+        if not selecionados:
+            return
+        for card in selecionados:
+            card.var_selecionado.set(False)
+            # Ler dos widgets, não de card.timer: _coletar_campos() só roda dentro de
+            # App.salvar(), então o que foi digitado desde o último salvamento ainda não
+            # chegou no Timer.
+            clone = estado.Timer(
+                data=card.entry_data.get().strip(),
+                advogado=self.advogado_atual,
+                pasta=card.cb_pasta.get(),
+                descricao=card.entry_descricao.get(),
+            )
+            self._adicionar_card(clone, posicao=self.cards.index(card) + 1, relayout=False)
+        self._atualizar_barra_selecao()
         self._relayout_cards()
+        self.salvar()
+
+    def _largura_util(self) -> int:
+        """Largura disponível pra grade de cards, ou 0 se a janela ainda não foi desenhada.
+        O frame interno do CTkScrollableFrame já vem dimensionado descontando a barra de
+        rolagem, então só sobra a folga dos padx=6 de cada card."""
+        largura = self.scroll.winfo_width() - 8
+        return largura if largura > 1 else 0
 
     def _calcular_colunas(self) -> int:
-        largura = self.scroll.winfo_width() - 24  # 24px de folga pra barra de rolagem interna
-        if largura <= 1:  # janela ainda não desenhada (winfo_width não confiável)
+        largura = self._largura_util()
+        if not largura:  # janela ainda não desenhada (winfo_width não confiável)
             return 3
         return min(MAX_COLUNAS, max(1, largura // LARGURA_MIN_CARD))
 
     def _ao_redimensionar_cards(self, event) -> None:
-        """Debounced: evita relayout a cada pixel arrastado ao redimensionar a janela."""
+        """Debounced: evita relayout a cada pixel arrastado ao redimensionar a janela.
+        O <Configure> daqui também dispara por altura (ao adicionar/remover card, ao rolar),
+        e nesses casos não há coluna nenhuma pra recalcular."""
+        if event.width == self._ultima_largura_scroll:
+            return
+        self._ultima_largura_scroll = event.width
         if self._job_redimensionar is not None:
             self.after_cancel(self._job_redimensionar)
         self._job_redimensionar = self.after(150, self._relayout_cards)
 
     def _relayout_cards(self) -> None:
         """Reposiciona os cards numa grade cujo número de colunas se adapta à largura
-        disponível (sem buracos após remoção)."""
+        disponível (sem buracos após remoção).
+
+        As colunas têm largura FIXA (minsize + weight=0) em vez de dividirem a largura da
+        janela. Com weight=1 os cards esticavam a cada pixel arrastado, e toda mudança de
+        largura faz o CustomTkinter redesenhar ~14 canvases por card (<Configure> ->
+        _draw) - era isso que travava a janela no resize. Agora a largura do card só muda
+        aqui, depois do debounce; a variação contínua do arrasto é absorvida pela
+        coluna-sobra no fim da grade."""
         self._job_redimensionar = None
         colunas = self._calcular_colunas()
-        maximo = max(colunas, self._colunas_configuradas)
-        for c in range(maximo):
-            self.cards_frame.grid_columnconfigure(c, weight=1 if c < colunas else 0, uniform="col")
-        self._colunas_configuradas = maximo
+        largura_col = max(LARGURA_MIN_CARD, (self._largura_util() or colunas * LARGURA_MIN_CARD) // colunas)
+        for c in range(max(colunas + 1, self._colunas_configuradas)):
+            if c < colunas:
+                self.cards_frame.grid_columnconfigure(c, weight=0, minsize=largura_col)
+            elif c == colunas:
+                self.cards_frame.grid_columnconfigure(c, weight=1, minsize=0)
+            else:
+                self.cards_frame.grid_columnconfigure(c, weight=0, minsize=0)
+        self._colunas_configuradas = colunas + 1
         for i, card in enumerate(self.cards):
             card.grid(row=i // colunas, column=i % colunas, sticky="nsew", padx=6, pady=6)
 
@@ -958,6 +1059,7 @@ class App(ctk.CTk):
     def remover_card(self, card: TimerCard) -> None:
         self.cards.remove(card)
         card.destroy()
+        self._atualizar_barra_selecao()
         self._relayout_cards()
         self.salvar()
 
