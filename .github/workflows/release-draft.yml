@@ -72,5 +72,5 @@ jobs:
         run: |
           if ([string]::IsNullOrWhiteSpace($env:VPK_TOKEN)) { throw 'Configure o secret RELEASES_TOKEN.' }
           $pacotes = Join-Path $env:GITHUB_WORKSPACE "build/releases/$env:RELEASE_VERSION/Releases"
-          dotnet tool run vpk -- upload github --repoUrl 'https://github.com/HenBH92/ficha_tempo-releases' --outputDir $pacotes --channel win --tag "v$env:RELEASE_VERSION" --releaseName "Ficha de Tempo VLF $env:RELEASE_VERSION" --publish false --pre false --merge false
+          dotnet tool run vpk -- upload github --repoUrl 'https://github.com/HenBH92/ficha_tempo-releases' --outputDir $pacotes --channel win --tag "v$env:RELEASE_VERSION" --releaseName "Ficha Tempo VLF $env:RELEASE_VERSION" --publish false --pre false --merge false
           if ($LASTEXITCODE -ne 0) { throw 'Criacao do rascunho falhou.' }

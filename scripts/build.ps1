@@ -49,7 +49,7 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $aplicativo 'FichaTempo_VLF.exe'))) { throw 'Executavel nao encontrado.' }
     if (-not $SkipPackage) {
         $releases = Join-Path $saida 'Releases'
-        & dotnet tool run vpk -- pack --packId 'VLFAdvogados.FichaTempo' --packVersion $Version --packDir $aplicativo --mainExe 'FichaTempo_VLF.exe' --packTitle 'Ficha de Tempo VLF' --packAuthors 'VLF Advogados' --runtime win-x64 --channel win --delta None --noPortable --icon (Join-Path $raiz 'assets\vlf_icon.ico') --releaseNotes (Join-Path $metadata 'release-notes.md') --outputDir $releases
+        & dotnet tool run vpk -- pack --packId 'VLFAdvogados.FichaTempo' --packVersion $Version --packDir $aplicativo --mainExe 'FichaTempo_VLF.exe' --packTitle 'Ficha Tempo VLF' --packAuthors 'VLF Advogados' --runtime win-x64 --channel win --delta None --noPortable --icon (Join-Path $raiz 'assets\vlf_icon.ico') --releaseNotes (Join-Path $metadata 'release-notes.md') --outputDir $releases
         Confirmar-Saida 'Velopack pack'
         Write-Host "Artefatos para distribuicao: $releases"
         Get-ChildItem -LiteralPath $releases -File | Select-Object Name, Length

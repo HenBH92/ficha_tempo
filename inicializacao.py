@@ -18,7 +18,7 @@ def garantir_instancia_unica():
     if not _mutex:
         raise ctypes.WinError(ctypes.get_last_error())
     if ctypes.get_last_error() == 183:
-        ctypes.windll.user32.MessageBoxW(None, "O Ficha de Tempo já está aberto.", "Ficha de Tempo", 0x40)
+        ctypes.windll.user32.MessageBoxW(None, "O Ficha Tempo VLF já está aberto.", "Ficha Tempo VLF", 0x40)
         raise SystemExit(0)
 
 

@@ -1,4 +1,4 @@
-# Ficha de Tempo VLF
+# Ficha Tempo VLF
 
 Aplicativo Windows para cronometrar atividades, preencher a planilha diaria e lancar horas no AdvWin.
 

@@ -44,9 +44,9 @@ def gerar_metadados(versao: str, commit: str, destino: Path) -> None:
     mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
   kids=[StringFileInfo([StringTable('041604B0', [
     StringStruct('CompanyName', 'VLF Advogados'),
-    StringStruct('FileDescription', 'Ficha de Tempo VLF'),
+    StringStruct('FileDescription', 'Ficha Tempo VLF'),
     StringStruct('FileVersion', '{versao}'),
-    StringStruct('ProductName', 'Ficha de Tempo VLF'),
+    StringStruct('ProductName', 'Ficha Tempo VLF'),
     StringStruct('ProductVersion', '{versao}'),
     StringStruct('OriginalFilename', 'FichaTempo_VLF.exe')])]),
     VarFileInfo([VarStruct('Translation', [1046, 1200])])])

@@ -516,7 +516,7 @@ class App(ctk.CTk):
         self._encerrando = False
         self._destruida = False
         self._eventos_ui = queue.Queue()
-        self.title("VLF Advogados - Ficha de Tempo")
+        self.title("VLF Advogados - Ficha Tempo")
         self.geometry("1040x640")
         self.minsize(860, 560)
         self.configure(fg_color=("#ffffff", "#18181d"))
