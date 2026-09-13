@@ -5,7 +5,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from atualizador import INTERVALO_MS, NaoInstalado, ServicoAtualizacao
+from atualizador import INTERVALO_MS, ServicoAtualizacao, mensagem_amigavel
 from caminhos import VERSAO
 from cores import COR_PRIMARIA
 from reinicio import ReinicioSeguro
@@ -67,8 +67,7 @@ class ControladorAtualizacao:
                 messagebox.showinfo("Atualizações", f"Você está usando a versão mais recente disponível ({VERSAO}).", parent=self.app)
         def falhou(exc):
             if manual:
-                texto = str(exc) if isinstance(exc, NaoInstalado) else "Não foi possível consultar atualizações. Confira sua conexão e tente novamente."
-                messagebox.showwarning("Atualizações", texto, parent=self.app)
+                messagebox.showwarning("Atualizações", mensagem_amigavel(exc), parent=self.app)
         self._executar(lambda: self.servico.verificar(manual=manual), pronto, falhou)
 
     def _mostrar(self):

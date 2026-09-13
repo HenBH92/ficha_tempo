@@ -36,6 +36,16 @@ def criar_gerenciador():
         raise NaoInstalado("Não foi possível identificar a instalação do programa.") from erro
 
 
+def mensagem_amigavel(erro: Exception) -> str:
+    """Só culpa a conexão quando o servidor não chegou a responder."""
+    if isinstance(erro, NaoInstalado):
+        return str(erro)
+    if "http status" in str(erro).lower():
+        return ("O servidor de atualizações respondeu, mas não há versão publicada para este programa. "
+                "Avise o suporte.")
+    return "Não foi possível consultar atualizações. Confira sua conexão e tente novamente."
+
+
 def _versao_estavel(texto):
     if not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", texto):
         return None

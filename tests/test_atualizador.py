@@ -89,6 +89,14 @@ class AtualizadorTest(unittest.TestCase):
             self.mgr.alvo.Version = versao
             self.assertIsNone(self.servico.verificar())
 
+    def test_mensagem_so_culpa_conexao_quando_servidor_nao_respondeu(self):
+        self.assertNotIn("Confira sua conexão",
+                         atualizador.mensagem_amigavel(RuntimeError("Network error: Http error: http status: 404")))
+        self.assertIn("Confira sua conexão",
+                      atualizador.mensagem_amigavel(RuntimeError("Network error: Http error: io: host desconhecido")))
+        self.assertEqual(atualizador.mensagem_amigavel(atualizador.NaoInstalado("instale pelo instalador")),
+                         "instale pelo instalador")
+
     def test_preferencias_corrompidas_nao_impedem_consulta(self):
         (self.pasta / "atualizador.json").write_text("[", encoding="utf-8")
         outro = atualizador.ServicoAtualizacao(self.pasta, lambda: self.mgr)
