@@ -97,7 +97,8 @@ class InterfaceTests(unittest.TestCase):
             assert len(app.cards) == 1
             with patch.object(atualizacao_ui.messagebox, "showwarning") as warning:
                 buttons = [w for w in app.rodape.winfo_children()
-                           if isinstance(w, main.ctk.CTkButton)]
+                           if isinstance(w, main.ctk.CTkButton)
+                           and "Verificar atualizacoes" in w.cget("text").replace("ç", "c").replace("õ", "o")]
                 assert len(buttons) == 1
                 buttons[0].invoke()
                 pump(app, lambda: not app.atualizacoes.ocupado)
@@ -172,6 +173,94 @@ class InterfaceTests(unittest.TestCase):
             destroy(app)
         ''')
 
+    def test_per_card_module_overrides_default_and_is_the_one_sent_to_advwin(self):
+        self.run_ui('''
+            app = make_app()
+            card = app.cards[0]
+            assert app.area_atual == "Trabalhista" and card.seg_modulo.get() == "Trabalhista"
+            # Editavel enquanto o card nao foi lancado; trava junto com os demais campos.
+            assert card.seg_modulo.cget("state") == "normal"
+            card._definir_campos_travados(True)
+            assert card.seg_modulo.cget("state") == "disabled"
+            card._definir_campos_travados(False)
+            # invoke() no botao, nao .set(): e o clique que estava quebrado com CTkOptionMenu.
+            card.seg_modulo._buttons_dict["Contencioso"].invoke()
+            assert card.seg_modulo.get() == "Contencioso"
+            card.cb_pasta.set("PASTA-TESTE")
+            card.var_selecionado.set(True)
+            app._duplicar_selecionados()
+            assert app.cards[1].seg_modulo.get() == "Contencioso"
+
+            # Mudar o padrao do topo nao mexe em card ja existente; so no proximo card novo.
+            app.seg_area.set("Contencioso")
+            app._area_mudou("Contencioso")
+            app.novo_card()
+            assert app.cards[0].seg_modulo.get() == "Contencioso"
+            assert app.cards[-1].seg_modulo.get() == "Contencioso"
+            app.cards[-1].seg_modulo.set("Trabalhista")
+
+            app.salvar()
+            timers, _, padrao = main.estado.carregar_estado()
+            assert [t.area for t in timers] == ["Contencioso", "Contencioso", "Trabalhista"], [t.area for t in timers]
+            assert padrao == "Contencioso"
+
+            # E o valor que chega no AdvWin vem do card, nao do padrao do topo.
+            enviados = []
+            app.cards[-1].entry_horas_cobraveis.delete(0, "end")
+            app.cards[-1].entry_horas_cobraveis.insert(0, "0:15")
+            app.cards[-1].cb_pasta.set("PASTA-TESTE")
+            app.advogado_atual = "Fulano"
+            with patch.object(main.advwin, "enfileirar",
+                              side_effect=lambda job, *a, **k: enviados.append(job)):
+                app.cards[-1]._inserir()
+            assert len(enviados) == 1
+            with patch.object(main.advwin, "pagina_advwin", return_value=None), \
+                 patch.object(main.advwin, "lancar_horas") as lancar:
+                enviados[0]()
+            assert lancar.call_args.args[-1] == "Trabalhista", lancar.call_args
+            destroy(app)
+        ''')
+
+    def test_launched_card_is_visibly_marked_and_locked(self):
+        self.run_ui('''
+            app = make_app()
+            novo, lancado = app.cards[0], main.TimerCard(app.cards_frame, app, main.estado.Timer(inserido=True))
+            app.update_idletasks()
+
+            # O sinal forte e a borda: a cor de fundo sozinha era branco contra quase-branco.
+            assert novo.cget("border_color") == main.COR_BORDA_CARD
+            assert lancado.cget("border_color") == main.COR_SUCESSO
+            assert lancado.cget("border_width") > novo.cget("border_width")
+            assert lancado.cget("fg_color") != novo.cget("fg_color")
+
+            # E a mensagem diz por que os campos nao respondem.
+            assert novo.label_status_advwin.cget("text") == ""
+            assert lancado.label_status_advwin.cget("text") == main.TEXTO_CARD_LANCADO
+            assert lancado.seg_modulo.cget("state") == "disabled"
+
+            # Cronometro tambem bloqueado: o tempo ja virou linha no AdvWin e no log.
+            for botao in (lancado.btn_iniciar, lancado.btn_pausar, lancado.btn_parar):
+                assert botao.cget("state") == "disabled"
+            lancado.btn_iniciar.invoke()
+            lancado._iniciar()                  # clique no botao
+            lancado.alternar_iniciar_pausar()   # atalho Ctrl+Espaco, que nao passa pelo botao
+            assert lancado.timer.status == "parado", lancado.timer.status
+            assert lancado.timer.elapso_s() == 0
+
+            # O card normal continua funcionando.
+            novo._iniciar()
+            assert novo.timer.status == "rodando"
+            novo._parar()
+            assert novo.timer.status == "parado"
+
+            # "Limpar tudo" devolve o card ao estado normal, sem sobra da mensagem.
+            lancado.resetar()
+            assert lancado.label_status_advwin.cget("text") == ""
+            assert lancado.cget("border_color") == main.COR_BORDA_CARD
+            assert lancado.seg_modulo.cget("state") == "normal"
+            destroy(app)
+        ''')
+
     def test_second_consent_saves_all_cards_and_reopens_fixed_timer_without_reset(self):
         self.run_ui('''
             app = make_app()
@@ -225,6 +314,56 @@ class InterfaceTests(unittest.TestCase):
             assert app.cards[1].timer.inserido
             assert app.cards[1].timer.acumulado_s == 600
             assert not main.estado.retomada_pendente()
+            destroy(app)
+        ''')
+
+    def test_report_window_opens_once_and_never_loses_what_was_written(self):
+        self.run_ui('''
+            # Sem formulario configurado o botao nem aparece: so levaria a "nao deu para enviar".
+            app = make_app()
+            assert not [w for w in app.rodape.winfo_children()
+                        if isinstance(w, main.ctk.CTkButton) and "Relatar" in w.cget("text")]
+            destroy(app)
+        ''')
+        self.run_ui('''
+            with patch.object(main.relatos, "URL_FORMULARIO", "https://exemplo.invalido/formResponse"):
+                app = make_app()
+            botoes = [w for w in app.rodape.winfo_children()
+                      if isinstance(w, main.ctk.CTkButton) and "Relatar" in w.cget("text")]
+            assert len(botoes) == 1
+            botoes[0].invoke()
+            abertas = lambda: [w for w in app.winfo_children()
+                               if isinstance(w, main.relatos.JanelaRelato) and w.winfo_exists()]
+            assert len(abertas()) == 1
+            app.abrir_relato()              # segundo clique traz pra frente, nao abre outra
+            assert len(abertas()) == 1
+            janela = abertas()[0]
+
+            # O que a janela mostra e exatamente o que seria enviado, com o contexto do app.
+            diag = janela._diagnostico()
+            assert diag["cards_abertos"] == 1 and diag["advwin_conectado"] is False
+            assert "versao" in diag and "windows" in diag
+
+            # Texto vazio nem chega a tentar enviar.
+            with patch.object(main.relatos, "enviar", side_effect=AssertionError("nao envia vazio")):
+                janela._enviar()
+            assert "Escreva" in janela.status.cget("text")
+
+            # Falha de entrega nao pode perder o texto: vai pro disco e pra area de transferencia.
+            with patch.object(main.relatos.messagebox, "showwarning") as aviso:
+                janela._concluir("Problema", "o botao sumiu", diag, RuntimeError("sem rede"))
+            aviso.assert_called_once()
+            salvos = list((pasta_dados() / "relatos").glob("*.txt"))
+            assert len(salvos) == 1, salvos
+            assert "o botao sumiu" in salvos[0].read_text(encoding="utf-8")
+            assert "o botao sumiu" in janela.clipboard_get()
+            assert janela.btn_enviar.cget("state") == "normal"   # da pra tentar de novo
+            assert janela.winfo_exists()
+
+            with patch.object(main.relatos.messagebox, "showinfo") as ok:
+                janela._concluir("Problema", "o botao sumiu", diag, None)
+            ok.assert_called_once()
+            assert not abertas()
             destroy(app)
         ''')
 

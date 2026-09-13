@@ -21,6 +21,7 @@ class Timer:
     advogado: str = ""
     cliente: str = ""
     pasta: str = ""
+    area: str = ""  # módulo do AdvWin ("Trabalhista"/"Contencioso"); vazio = área padrão do topo
     descricao: str = ""
     horas_cobraveis_texto: str = ""
     inserido: bool = False  # já lançado no AdvWin e registrado no log local

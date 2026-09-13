@@ -22,6 +22,7 @@ import favoritos
 import icones
 import modelos
 import planilha
+import relatos
 import retro_preview
 from caminhos import pasta_recursos, VERSAO
 from atualizacao_ui import ControladorAtualizacao
@@ -33,6 +34,7 @@ from cores import (
     COR_FUNDO_CARD,
     COR_HEADER_BORDA,
     COR_HEADER_FUNDO,
+    COR_HOVER_NEUTRO,
     COR_ICONE_NEUTRO,
     COR_MARCA_LARANJA,
     COR_MARCA_LARANJA_CLARA,
@@ -57,6 +59,9 @@ LIMITE_INATIVIDADE_S = 10 * 60
 LARGURA_MIN_CARD = 300
 MAX_COLUNAS = 4
 INTERVALO_SESSAO_ADVWIN_MS = 5000
+# Diz também por que os campos não respondem - card lançado trava tudo, e sem esse aviso
+# parecia defeito. _apos_item_lote() reaproveita este texto no resumo do lote.
+TEXTO_CARD_LANCADO = "✓ Lançado no AdvWin - campos bloqueados"
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -75,18 +80,27 @@ def _segundos_sem_atividade() -> float:
     return ociosidade_ms / 1000
 
 
-def _bloco(master, rotulo: str) -> ctk.CTkFrame:
-    """Frame com um rótulo pequeno em cima, para o campo ser empacotado dentro."""
+def _bloco(master, rotulo: str, dica: str = "") -> ctk.CTkFrame:
+    """Frame com um rótulo pequeno em cima, para o campo ser empacotado dentro.
+
+    `dica` prende o Tooltip no rótulo, não no campo - o popup do Tooltip nasce logo abaixo
+    do widget, que é exatamente onde um CTkOptionMenu abre o dropdown (tk_popup); com os
+    dois no mesmo lugar o menu fecha antes de dar pra escolher a opção."""
     frame = ctk.CTkFrame(master, fg_color="transparent")
-    ctk.CTkLabel(frame, text=rotulo, font=ctk.CTkFont(size=10),
-                 text_color=COR_TEXTO_SUAVE, anchor="w").pack(anchor="w")
+    label = ctk.CTkLabel(frame, text=rotulo, font=ctk.CTkFont(size=10),
+                         text_color=COR_TEXTO_SUAVE, anchor="w")
+    label.pack(anchor="w")
+    if dica:
+        Tooltip(label, dica)
     return frame
 
 
-def _legenda_cor(master, cor: str, texto: str) -> ctk.CTkFrame:
-    """Item de legenda: quadradinho colorido + texto, para explicar as cores dos cards."""
+def _legenda_cor(master, cor: str, texto: str, borda=COR_BORDA_CARD) -> ctk.CTkFrame:
+    """Item de legenda: quadradinho colorido + texto, para explicar as cores dos cards.
+
+    `borda` existe porque o card já lançado se distingue pela borda, não pelo preenchimento."""
     item = ctk.CTkFrame(master, fg_color="transparent")
-    ctk.CTkFrame(item, fg_color=cor, border_width=1, border_color=COR_BORDA_CARD,
+    ctk.CTkFrame(item, fg_color=cor, border_width=1, border_color=borda,
                  width=11, height=11, corner_radius=3).pack(side="left")
     ctk.CTkLabel(item, text=texto, font=ctk.CTkFont(size=10), text_color=COR_TEXTO_SUAVE).pack(side="left", padx=(5, 0))
     return item
@@ -208,6 +222,26 @@ class TimerCard(ctk.CTkFrame):
                                                    command=self._alternar_favorito_pasta)
         self.btn_favoritar_pasta.pack(side="left", padx=(4, 0))
 
+        # Linha própria: com o card em LARGURA_MIN_CARD não sobra largura pra esse seletor
+        # em nenhuma das outras linhas (medido: linha1 já pede 352px pra 276 úteis). Fica
+        # colado na Pasta de propósito - os dois juntos é que identificam o processo.
+        linha_modulo = ctk.CTkFrame(self, fg_color="transparent")
+        linha_modulo.pack(fill="x", padx=12, pady=3)
+        bloco_modulo = _bloco(linha_modulo, "Módulo",
+                              "Listagem do AdvWin onde esta pasta será procurada.\n"
+                              "O código da pasta só é único dentro de cada módulo.")
+        bloco_modulo.pack(side="left")
+        # Segmentado, não CTkOptionMenu: no Windows o dropdown do CTkOptionMenu é um
+        # tkinter.Menu aberto com post(), que bloqueia o loop do Tk e não pega o clique
+        # na opção (medido - o menu abre e o app congela até ser dispensado).
+        self.seg_modulo = ctk.CTkSegmentedButton(
+            bloco_modulo, values=list(advwin.URLS_AREA), font=ctk.CTkFont(size=12), height=28,
+            selected_color=COR_PRIMARIA, selected_hover_color=COR_PRIMARIA_HOVER,
+            unselected_hover_color=COR_HOVER_NEUTRO,
+        )
+        self.seg_modulo.set(timer.area if timer.area in advwin.URLS_AREA else app.area_atual)
+        self.seg_modulo.pack()
+
         linha3 = ctk.CTkFrame(self, fg_color="transparent")
         linha3.pack(fill="x", padx=12, pady=3)
 
@@ -279,6 +313,7 @@ class TimerCard(ctk.CTkFrame):
         if timer.inserido:
             self.btn_inserir.configure(text="✓", image=None, state="disabled", fg_color=COR_SUCESSO_HOVER)
             self._definir_campos_travados(True)
+            self._marcar_status_advwin(TEXTO_CARD_LANCADO, COR_SUCESSO)
         self._atualizar_aparencia_fixar()
         self._atualizar_cor_card()
         self._atualizar_estrela_pasta()
@@ -292,17 +327,30 @@ class TimerCard(ctk.CTkFrame):
             cor = COR_CARD_PAUSADO
         else:
             cor = COR_FUNDO_CARD
-        self.configure(fg_color=cor)
+        # Borda verde é o que distingue o card já lançado: o fundo dele tem que ficar
+        # discreto pra não brigar com o verde de "rodando" e o bege de "pausado", e sozinho
+        # não chamava atenção nenhuma - foi por isso que os campos travados pareciam bug.
+        inserido = self.timer.inserido
+        self.configure(fg_color=cor,
+                       border_width=2 if inserido else 1,
+                       border_color=COR_SUCESSO if inserido else COR_BORDA_CARD)
 
     def _marcar_status_advwin(self, texto: str, cor: str) -> None:
         self.label_status_advwin.configure(text=texto, text_color=cor)
 
     def _definir_campos_travados(self, travado: bool) -> None:
-        """Bloqueia os campos do card enquanto o lançamento no AdvWin está em voo (evita
-        editar pasta/descrição sem saber se o valor enviado já mudou) - também usada para
-        manter travado um card que já foi inserido."""
+        """Bloqueia campos e cronômetro do card enquanto o lançamento no AdvWin está em voo
+        (evita editar pasta/descrição sem saber se o valor enviado já mudou) - também usada
+        para manter travado um card que já foi inserido.
+
+        Os botões só dão o retorno visual; quem de fato barra a ação é o guarda em
+        _iniciar/_pausar/_parar, porque o atalho Ctrl+Espaço não passa pelos botões."""
         estado_campo = "disabled" if travado else "normal"
+        self.btn_iniciar.configure(state=estado_campo)
+        self.btn_pausar.configure(state=estado_campo)
+        self.btn_parar.configure(state=estado_campo)
         self.entry_data.configure(state=estado_campo)
+        self.seg_modulo.configure(state=estado_campo)
         self.cb_pasta.entry.configure(state=estado_campo)
         self.cb_pasta.btn_seta.configure(state=estado_campo)
         self.btn_favoritar_pasta.configure(state=estado_campo)
@@ -346,6 +394,7 @@ class TimerCard(ctk.CTkFrame):
         t.data = self.entry_data.get().strip()
         t.advogado = self.app.advogado_atual
         t.pasta = self.cb_pasta.get()
+        t.area = self.seg_modulo.get()
         t.descricao = self.entry_descricao.get()
         t.horas_cobraveis_texto = self.entry_horas_cobraveis.get().strip()
 
@@ -354,20 +403,29 @@ class TimerCard(ctk.CTkFrame):
         self.entry_horas_cobraveis.delete(0, "end")
         self.entry_horas_cobraveis.insert(0, texto)
 
+    def _cronometro_travado(self) -> bool:
+        """Card já lançado não mexe mais no cronômetro: o tempo dele virou linha no AdvWin e
+        no log local, e mudar depois só criaria divergência entre os dois."""
+        return self.timer.inserido
+
     def _iniciar(self) -> None:
-        if self.app._encerrando:
+        if self.app._encerrando or self._cronometro_travado():
             return
         self.timer.iniciar()
         self._atualizar_cor_card()
         self.app.salvar()
 
     def _pausar(self) -> None:
+        if self._cronometro_travado():
+            return
         self.timer.pausar()
         self._atualizar_horas_cobraveis_auto()
         self._atualizar_cor_card()
         self.app.salvar()
 
     def _parar(self) -> None:
+        if self._cronometro_travado():
+            return
         self.timer.parar()
         self.label_tempo.configure(text=self.timer.elapso_fmt())
         self._atualizar_horas_cobraveis_auto()
@@ -423,7 +481,7 @@ class TimerCard(ctk.CTkFrame):
         self.btn_inserir.configure(text="⏳", image=None, state="disabled")
         self._definir_campos_travados(True)
         pasta, data, descricao, horas_texto = t.pasta, t.data, t.descricao, t.horas_cobraveis_texto
-        area = self.app.area_atual
+        area = t.area  # _coletar_campos() acima já leu o seletor de módulo deste card
         advwin.enfileirar(
             lambda: advwin.lancar_horas(advwin.pagina_advwin(), pasta, data, descricao, horas_texto, area),
             lambda resultado, erro: self._apos_inserir_advwin_ui(erro, ao_concluir),
@@ -467,6 +525,7 @@ class TimerCard(ctk.CTkFrame):
 
         t.inserido = True
         self.btn_inserir.configure(text="✓", image=None, state="disabled", fg_color=COR_SUCESSO_HOVER)
+        self._marcar_status_advwin(TEXTO_CARD_LANCADO, COR_SUCESSO)
         self._atualizar_cor_card()
         self.app.salvar()
         self.app._atualizar_botao_advwin()
@@ -497,8 +556,10 @@ class TimerCard(ctk.CTkFrame):
         self.timer = estado.Timer()
         self.var_selecionado.set(False)
         self._definir_campos_travados(False)
+        self._marcar_status_advwin("", COR_TEXTO_SUAVE)
         self.entry_data.delete(0, "end")
         self.entry_data.insert(0, datetime.now().strftime("%d/%m/%Y"))
+        self.seg_modulo.set(self.app.area_atual)
         self.cb_pasta.set("")
         self.entry_descricao.set("")
         self.entry_horas_cobraveis.delete(0, "end")
@@ -541,7 +602,9 @@ class App(ctk.CTk):
 
         timers, advogado_atual, area_atual = estado.carregar_estado()
         self.advogado_atual = advogado_atual
-        self.area_atual = area_atual
+        # estado.json é editável na mão: um módulo desconhecido aqui viraria KeyError em
+        # advwin.lancar_horas(), então cai no padrão em vez de propagar.
+        self.area_atual = area_atual if area_atual in advwin.URLS_AREA else next(iter(advwin.URLS_AREA))
 
         hoje = datetime.now().strftime("%d/%m/%Y")
         retomando = estado.retomada_pendente()
@@ -594,11 +657,17 @@ class App(ctk.CTk):
 
         linha_area = ctk.CTkFrame(advogado_frame, fg_color="transparent")
         linha_area.pack(side="top", fill="x", pady=(6, 0))
-        ctk.CTkLabel(linha_area, text="Área:", text_color=COR_TEXTO_SUAVE).pack(side="left", padx=(0, 10))
+        # Tooltip vai no rótulo: CTkSegmentedButton não implementa bind().
+        rotulo_area = ctk.CTkLabel(linha_area, text="Módulo padrão:", text_color=COR_TEXTO_SUAVE)
+        rotulo_area.pack(side="left", padx=(0, 10))
+        Tooltip(rotulo_area, "Módulo com que os cards novos nascem (e o lançamento retroativo usa).\n"
+                             "Cada card já existente mantém o módulo escolhido nele.")
         self.seg_area = ctk.CTkSegmentedButton(
-            linha_area, values=["Trabalhista", "Contencioso"], command=self._area_mudou
+            linha_area, values=list(advwin.URLS_AREA), command=self._area_mudou,
+            selected_color=COR_PRIMARIA, selected_hover_color=COR_PRIMARIA_HOVER,
+            unselected_hover_color=COR_HOVER_NEUTRO,
         )
-        self.seg_area.set(area_atual or "Trabalhista")
+        self.seg_area.set(self.area_atual)
         self.seg_area.pack(side="left")
 
         self.btn_tema = ctk.CTkButton(linha_titulo, text="", image=icones.icone("lua", cor=COR_ICONE_NEUTRO),
@@ -684,7 +753,8 @@ class App(ctk.CTk):
         linha_legenda.pack(pady=(4, 8))
         _legenda_cor(linha_legenda, COR_CARD_RODANDO, "Rodando").pack(side="left", padx=8)
         _legenda_cor(linha_legenda, COR_CARD_PAUSADO, "Pausado").pack(side="left", padx=8)
-        _legenda_cor(linha_legenda, COR_CARD_INSERIDO, "Inserido").pack(side="left", padx=8)
+        _legenda_cor(linha_legenda, COR_CARD_INSERIDO, "Lançado (bloqueado)",
+                     borda=COR_SUCESSO).pack(side="left", padx=8)
 
         ctk.CTkFrame(self, fg_color=COR_HEADER_BORDA, height=1).pack(fill="x")
 
@@ -696,6 +766,13 @@ class App(ctk.CTk):
         self.rodape = ctk.CTkFrame(self, fg_color=COR_HEADER_FUNDO, corner_radius=0, height=26)
         self.rodape.pack(fill="x", side="bottom")
         self.rodape.pack_propagate(False)
+        # Só aparece com o formulário de relatos configurado - sem ele o botão só levaria a
+        # "não deu para enviar". Preenchendo URL_FORMULARIO em relatos.py, volta sozinho.
+        # Empacotado antes do label_salvo: em side="right" quem vem primeiro fica mais à direita.
+        if relatos.URL_FORMULARIO:
+            ctk.CTkButton(self.rodape, text="Relatar problema ou sugestão", height=22,
+                           fg_color="transparent", text_color=COR_TEXTO_SUAVE,
+                           hover_color=COR_HOVER_NEUTRO, command=self.abrir_relato).pack(side="right", padx=12)
         self.label_salvo = ctk.CTkLabel(self.rodape, text="", font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE)
         self.label_salvo.pack(side="right", padx=16)
         ctk.CTkButton(self.rodape, text=f"v{VERSAO} · Verificar atualizações", height=22,
@@ -910,6 +987,23 @@ class App(ctk.CTk):
             return
         retro_preview.JanelaRetroativa(self, lotes, self.advogado_atual, self.pastas_favoritas, self.area_atual)
 
+    def abrir_relato(self) -> None:
+        """Relato de problema/sugestão, entregue pelo próprio app (ver relatos.py)."""
+        if self._encerrando:
+            return
+        janela = next((w for w in self.winfo_children()
+                       if isinstance(w, relatos.JanelaRelato) and w.winfo_exists()), None)
+        if janela is not None:  # já aberta: traz pra frente em vez de abrir outra
+            janela.lift()
+            janela.focus_force()
+            return
+        relatos.JanelaRelato(self, {
+            "advogado": self.advogado_atual or "(não escolhido)",
+            "modulo_padrao": self.area_atual,
+            "cards_abertos": len(self.cards),
+            "advwin_conectado": advwin.esta_conectado(),
+        })
+
     def novo_card(self) -> None:
         if self._encerrando:
             return
@@ -944,9 +1038,9 @@ class App(ctk.CTk):
         self._atualizar_barra_selecao()
 
     def _duplicar_selecionados(self) -> None:
-        """Clona cada card marcado logo ao lado do original, copiando só Pasta, Descrição e
-        Data - o clone nasce com cronômetro zerado, destravado e não lançado (defaults do
-        estado.Timer)."""
+        """Clona cada card marcado logo ao lado do original, copiando só Pasta, Módulo,
+        Descrição e Data - o clone nasce com cronômetro zerado, destravado e não lançado
+        (defaults do estado.Timer)."""
         if self._encerrando:
             return
         selecionados = [c for c in self.cards if c.var_selecionado.get()]
@@ -961,6 +1055,7 @@ class App(ctk.CTk):
                 data=card.entry_data.get().strip(),
                 advogado=self.advogado_atual,
                 pasta=card.cb_pasta.get(),
+                area=card.seg_modulo.get(),
                 descricao=card.entry_descricao.get(),
             )
             self._adicionar_card(clone, posicao=self.cards.index(card) + 1, relayout=False)
