@@ -27,10 +27,15 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - name: Conferir secret de publicacao antes de construir
+        env:
+          VPK_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:VPK_TOKEN)) { throw 'Configure o secret RELEASES_TOKEN.' }
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.14.0'
           architecture: x64
@@ -38,7 +43,7 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-build.txt
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Instalar dependencias fixadas
@@ -58,7 +63,7 @@ jobs:
           [IO.File]::WriteAllText($notas, $env:RELEASE_NOTES, [Text.UTF8Encoding]::new($false))
           & .\scripts\build.ps1 -Version $env:RELEASE_VERSION -NotesFile $notas -Python (Get-Command python).Source
       - name: Guardar pacotes e manifesto para revisao
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ficha-tempo-windows
           if-no-files-found: error
@@ -70,7 +75,6 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
           VPK_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:VPK_TOKEN)) { throw 'Configure o secret RELEASES_TOKEN.' }
           $pacotes = Join-Path $env:GITHUB_WORKSPACE "build/releases/$env:RELEASE_VERSION/Releases"
           dotnet tool run vpk -- upload github --repoUrl 'https://github.com/HenBH92/ficha_tempo-releases' --outputDir $pacotes --channel win --tag "v$env:RELEASE_VERSION" --releaseName "Ficha Tempo VLF $env:RELEASE_VERSION" --publish false --pre false --merge false
           if ($LASTEXITCODE -ne 0) { throw 'Criacao do rascunho falhou.' }
