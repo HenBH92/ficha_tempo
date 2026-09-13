@@ -56,6 +56,7 @@ PASTA_ASSETS = pasta_recursos() / "assets"
 LIMITE_INATIVIDADE_S = 10 * 60
 LARGURA_MIN_CARD = 300
 MAX_COLUNAS = 4
+INTERVALO_SESSAO_ADVWIN_MS = 5000
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -740,6 +741,7 @@ class App(ctk.CTk):
         self.after(1000, self._tick)
         self.after(30_000, self._checar_inatividade)
         self.after(50, self._processar_eventos_ui)
+        self.after(INTERVALO_SESSAO_ADVWIN_MS, self._monitorar_sessao_advwin)
         self.atualizacoes = ControladorAtualizacao(self, advwin)
         if retomando:
             self.salvar()  # Consome a retomada somente após reconstruir a interface.
@@ -850,6 +852,18 @@ class App(ctk.CTk):
         self._atualizar_barra_selecao()
         self._relayout_cards()
         self.salvar()
+
+    def _monitorar_sessao_advwin(self) -> None:
+        """Detecta a janela do Chrome fechada na mão e devolve o botão para "Conectar
+        AdvWin". A checagem vai pela fila porque a sessão do Playwright é presa à thread
+        dela - e só quando a fila está ociosa, para não entrar na frente de um lote nem
+        competir com o encerramento seguro."""
+        self.after(INTERVALO_SESSAO_ADVWIN_MS, self._monitorar_sessao_advwin)
+        if self._encerrando or not advwin.esta_conectado() or advwin.esta_ocupado():
+            return
+        advwin.enfileirar(advwin.verificar_sessao,
+                          lambda resultado, erro: self._atualizar_botao_advwin(),
+                          self.agendar_ui)
 
     def _atualizar_botao_advwin(self) -> None:
         """Reflete no botão o último estado conhecido da sessão do AdvWin - atualizado a

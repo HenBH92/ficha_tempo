@@ -27,6 +27,25 @@ _contexto = None
 _autenticado = False
 
 
+def _esquecer_sessao() -> None:
+    global _contexto, _autenticado
+    _contexto, _autenticado = None, False
+
+
+def _pagina_ativa():
+    """Devolve a página da sessão, confirmando que o Chrome ainda responde.
+
+    `_contexto.pages` e `pagina.is_closed()` vêm de um cache do cliente do Playwright e
+    continuam dizendo que está tudo vivo depois que o usuário fecha a janela (medido:
+    `pages` seguia com 1 aba e `is_closed()` com False, com o Chrome já morto). Só uma
+    chamada que conversa de verdade com o browser levanta TargetClosedError - por isso o
+    title(), que é quem decide se a sessão ainda existe.
+    """
+    pagina = _contexto.pages[0] if _contexto.pages else _contexto.new_page()
+    pagina.title()
+    return pagina
+
+
 def pagina_advwin():
     """Abre (ou reaproveita) a sessão do AdvWin já autenticada.
 
@@ -36,20 +55,22 @@ def pagina_advwin():
     global _playwright, _contexto, _autenticado
     if _contexto is not None:
         try:
-            pagina = _contexto.pages[0] if _contexto.pages else _contexto.new_page()
+            pagina = _pagina_ativa()
         except Exception:
-            # Contexto "morto" (ex.: usuário fechou a janela do Chrome da automação) -
-            # sem isso, reconectar reaproveitava o mesmo contexto inválido e falhava de
-            # novo silenciosamente, mesmo depois do usuário clicar em "Conectar AdvWin".
+            # Sessão "morta" (ex.: usuário fechou a janela do Chrome da automação) - sem
+            # isso, reconectar reaproveitava a mesma sessão inválida e falhava de novo
+            # silenciosamente, mesmo depois do usuário clicar em "Conectar AdvWin".
             print("[advwin] sessão anterior não está mais disponível - reconectando...")
-            _contexto = None
-            _autenticado = False
+            _esquecer_sessao()
 
     if _contexto is None:
         print("[advwin] abrindo Chrome (perfil de automação)...")
         from playwright.sync_api import sync_playwright
 
-        _playwright = sync_playwright().start()
+        if _playwright is None:
+            # Fechar a janela mata só o Chrome; o driver do Playwright continua de pé.
+            # Reaproveitá-lo evita deixar um processo node órfão a cada reconexão.
+            _playwright = sync_playwright().start()
         # chromium_sandbox tem default False na API do Playwright (ao contrário do que o
         # nome sugere) - sem isso o Chrome roda com --no-sandbox e mostra o aviso "sinalizador
         # de linha de comando não suportado". Liga de volta o sandbox de verdade.
@@ -87,8 +108,26 @@ def pagina_advwin():
 
 
 def esta_conectado() -> bool:
-    """True se há uma sessão do AdvWin aberta e autenticada nesta execução."""
+    """Último estado conhecido da sessão - pode ser lido de qualquer thread (só olha os
+    globais, não fala com o Playwright)."""
     return _autenticado and _contexto is not None
+
+
+def verificar_sessao() -> bool:
+    """Confere se a janela do Chrome continua aberta e devolve o estado real da conexão.
+
+    Precisa ir pela fila (`enfileirar`), nunca direto da interface: a API síncrona do
+    Playwright só pode ser usada na thread que criou a sessão. Sem essa checagem, fechar
+    a janela na mão deixava o botão "Conectado" até a próxima tentativa de uso falhar -
+    o evento `context.on("close")` não serve para isso porque não chega a ser entregue
+    enquanto a fila está ociosa (medido)."""
+    if _contexto is not None:
+        try:
+            _pagina_ativa()
+        except Exception:
+            print("[advwin] janela do Chrome foi fechada - sessão encerrada")
+            _esquecer_sessao()
+    return esta_conectado()
 
 
 def _esperar_rede_ociosa(pagina) -> None:
@@ -287,6 +326,7 @@ def _demo():
     assert URL_DASHBOARD.startswith("https://")
     assert set(URLS_AREA) == {"Trabalhista", "Contencioso"}
     assert esta_conectado() is False
+    assert verificar_sessao() is False  # sem sessão aberta não tenta falar com o Chrome
     assert re.sub(r"\D", "", "20/08/2026") == "20082026"
     assert _hhmm("0:15") == "00:15"
     assert _hhmm("1:05") == "01:05"
