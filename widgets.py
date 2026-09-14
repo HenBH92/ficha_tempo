@@ -14,6 +14,23 @@ ALTURA_LINHA = 28
 ATRASO_DICA_MS = 400
 
 
+def _janela_flutuante(master) -> tk.Toplevel:
+    """Toplevel sem moldura, escondido, pra flutuar sobre a janela (dropdown e balão de dica).
+
+    Os widgets CTk lá dentro registram o Toplevel no ScalingTracker do customtkinter. Quando ele
+    percebe troca de DPI na janela, faz `attributes("-alpha", 0.15)` e só depois chama
+    `block_update_dimensions_event()` - método que existe em CTk/CTkToplevel, não em Toplevel puro.
+    O AttributeError estoura no meio: a janela fica presa em 15% de opacidade (lista quase
+    invisível) e o loop de DPI morre junto, por isso só o primeiro popup a abrir aparecia apagado.
+    Os stubs deixam o tracker terminar e devolver o alpha pra 1."""
+    janela = tk.Toplevel(master)
+    janela.wm_overrideredirect(True)
+    janela.block_update_dimensions_event = lambda: None
+    janela.unblock_update_dimensions_event = lambda: None
+    janela.withdraw()
+    return janela
+
+
 class BuscaCombobox(ctk.CTkFrame):
     def __init__(self, master, opcoes: list[str], estrito: bool = True, command=None, **kw):
         super().__init__(master, fg_color="transparent")
@@ -71,9 +88,7 @@ class BuscaCombobox(ctk.CTkFrame):
         """Monta o popup uma vez só. As linhas são widgets reaproveitados (lista virtual):
         recriá-las a cada tecla digitada travava o campo, e o tk.Listbox que havia aqui antes
         era Tk puro - não seguia o tema do CTk nem tinha hover."""
-        self._popup = tk.Toplevel(self)
-        self._popup.wm_overrideredirect(True)
-        self._popup.withdraw()
+        self._popup = _janela_flutuante(self)
         self._caixa = ctk.CTkFrame(self._popup, corner_radius=0, border_width=1,
                                    border_color=COR_POPUP_BORDA, fg_color=COR_POPUP_FUNDO)
         self._caixa.pack(fill="both", expand=True)
@@ -320,9 +335,7 @@ class Tooltip:
         texto = self.texto() if callable(self.texto) else self.texto
         if not texto:
             return
-        self.popup = tk.Toplevel(self.widget)
-        self.popup.wm_overrideredirect(True)
-        self.popup.withdraw()
+        self.popup = _janela_flutuante(self.widget)
         self.popup.configure(background=COR_TOOLTIP_FUNDO)
         caixa = ctk.CTkFrame(self.popup, corner_radius=0, fg_color=COR_TOOLTIP_FUNDO,
                              border_width=1, border_color=COR_TOOLTIP_BORDA)
@@ -437,6 +450,13 @@ def _demo():
     assert dropdown._job_seguir is None
     dropdown._seguir_campo()
     assert dropdown._job_seguir is None  # fechado: não reagenda
+
+    # Regressão: ao ver troca de DPI, o ScalingTracker baixa o alpha da janela do popup, chama
+    # métodos de CTk nela e só então devolve o alpha. Sem os stubs isso estourava no meio e a
+    # lista ficava em 15% de opacidade, quase invisível.
+    ctk.ScalingTracker.window_dpi_scaling_dict[dropdown._popup] = 0.5  # finge que o DPI mudou
+    ctk.ScalingTracker.check_dpi_scaling()
+    assert float(dropdown._popup.attributes("-alpha")) == 1.0
 
     botao = ctk.CTkButton(root, text="x")
     dica = Tooltip(botao, "explicação")
