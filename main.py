@@ -17,6 +17,7 @@ import customtkinter as ctk
 from PIL import Image
 
 import advwin
+import barra_tarefas
 import estado
 import favoritos
 import icones
@@ -1183,6 +1184,7 @@ class App(ctk.CTk):
         for card in self.cards:
             card.atualizar_relogio()
         self._atualizar_total_horas()
+        barra_tarefas.definir_contador(self, sum(c.timer.status == "rodando" for c in self.cards))
         self.after(1000, self._tick)
 
     def _checar_inatividade(self) -> None:
