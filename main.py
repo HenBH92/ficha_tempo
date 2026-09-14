@@ -21,6 +21,7 @@ import barra_tarefas
 import estado
 import favoritos
 import icones
+import miniatura
 import modelos
 import planilha
 import relatos
@@ -601,8 +602,9 @@ class App(ctk.CTk):
         self.modelos_descricao = modelos.carregar_modelos()
         self.pastas_favoritas = favoritos.carregar_pastas()
 
-        timers, advogado_atual, area_atual = estado.carregar_estado()
+        timers, advogado_atual, area_atual, miniatura_ao_minimizar, escala_miniatura = estado.carregar_estado()
         self.advogado_atual = advogado_atual
+        self.escala_miniatura = escala_miniatura
         # estado.json é editável na mão: um módulo desconhecido aqui viraria KeyError em
         # advwin.lancar_horas(), então cai no padrão em vez de propagar.
         self.area_atual = area_atual if area_atual in advwin.URLS_AREA else next(iter(advwin.URLS_AREA))
@@ -677,6 +679,13 @@ class App(ctk.CTk):
                                        command=self._alternar_tema)
         self.btn_tema.pack(side="right", padx=(10, 0))
         Tooltip(self.btn_tema, "Alternar modo claro/escuro")
+
+        self.var_miniatura = ctk.BooleanVar(value=miniatura_ao_minimizar)
+        sw_miniatura = ctk.CTkSwitch(linha_titulo, text="Miniatura ao minimizar", variable=self.var_miniatura,
+                                      command=self.salvar, text_color=COR_TEXTO_SUAVE, progress_color=COR_PRIMARIA)
+        sw_miniatura.pack(side="right", padx=(10, 0))
+        Tooltip(sw_miniatura, "Ao minimizar, mostra uma janelinha sempre visível com o cronômetro ativo,\n"
+                              "para pausar ou retomar sem abrir o app.")
 
         ctk.CTkFrame(header, fg_color=COR_HEADER_BORDA, height=1).pack(fill="x")
 
@@ -816,6 +825,9 @@ class App(ctk.CTk):
         self.bind_all("<Control-n>", lambda e: self.novo_card())
 
         self.protocol("WM_DELETE_WINDOW", self._ao_fechar)
+        self._miniatura: miniatura.JanelaMiniatura | None = None
+        self.bind("<Unmap>", self._ao_desmapear, add="+")
+        self.bind("<Map>", self._ao_mapear, add="+")
         self.after(1000, self._tick)
         self.after(30_000, self._checar_inatividade)
         self.after(50, self._processar_eventos_ui)
@@ -1177,7 +1189,8 @@ class App(ctk.CTk):
         for card in self.cards:
             card._coletar_campos()
         estado.salvar_estado([c.timer for c in self.cards], self.advogado_atual, self.area_atual,
-                             retomada_atualizacao=retomada_atualizacao)
+                             retomada_atualizacao=retomada_atualizacao, miniatura=self.var_miniatura.get(),
+                             escala_miniatura=self.escala_miniatura)
         self.label_salvo.configure(text=f"Salvo às {datetime.now().strftime('%H:%M')}")
 
     def _tick(self) -> None:
@@ -1185,7 +1198,37 @@ class App(ctk.CTk):
             card.atualizar_relogio()
         self._atualizar_total_horas()
         barra_tarefas.definir_contador(self, sum(c.timer.status == "rodando" for c in self.cards))
+        if self._miniatura is not None and self._miniatura.visivel():
+            self._miniatura.atualizar()
         self.after(1000, self._tick)
+
+    def _card_para_miniatura(self) -> "TimerCard | None":
+        """O último iniciado entre os que estão rodando; sem nenhum, o primeiro pausado (pra poder
+        retomar). Card lançado fica de fora: o cronômetro dele está travado."""
+        livres = [c for c in self.cards if not c.timer.inserido]
+        rodando = [c for c in livres if c.timer.status == "rodando"]
+        if rodando:
+            return max(rodando, key=lambda c: c.timer.segmento_inicio)  # ISO: ordem de texto = de data
+        return next((c for c in livres if c.timer.status == "pausado"), None)
+
+    def _ao_desmapear(self, event) -> None:
+        # A bindtag da janela vale pra todos os widgets dela: só interessa o <Unmap> da própria
+        # janela, e só ao minimizar - o withdraw() que o CTk faz na troca de tema também desmapeia.
+        if (event.widget is not self or self._destruida or not self.var_miniatura.get()
+                or self.state() != "iconic"):
+            return
+        card = self._card_para_miniatura()
+        if card is None:
+            return
+        if self._miniatura is None:
+            self._miniatura = miniatura.JanelaMiniatura(self)
+        self._miniatura.mostrar(card)
+
+    def _ao_mapear(self, event) -> None:
+        # Ao minimizar, o Tk manda um <Map> logo depois do <Unmap>, com a janela ainda "iconic"
+        # (medido): sem esse filtro a miniatura sumia no mesmo instante em que aparecia.
+        if event.widget is self and self._miniatura is not None and self.state() != "iconic":
+            self._miniatura.esconder()
 
     def _checar_inatividade(self) -> None:
         if self._encerrando:

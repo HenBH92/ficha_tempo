@@ -54,10 +54,13 @@ class Timer:
 
 
 def salvar_estado(timers: list[Timer], advogado_atual: str = "", area_atual: str = "Trabalhista",
-                  retomada_atualizacao: bool = False) -> None:
+                  retomada_atualizacao: bool = False, miniatura: bool = False,
+                  escala_miniatura: float = 1.0) -> None:
     conteudo = {
         "advogado_atual": advogado_atual,
         "area_atual": area_atual,
+        "miniatura_ao_minimizar": miniatura,
+        "escala_miniatura": escala_miniatura,
         "timers": [asdict(t) for t in timers],
         "retomada_atualizacao": retomada_atualizacao,
     }
@@ -70,16 +73,19 @@ def retomada_pendente() -> bool:
     return json.loads(ARQUIVO_ESTADO.read_text(encoding="utf-8")).get("retomada_atualizacao", False) is True
 
 
-def carregar_estado() -> tuple[list[Timer], str, str]:
+def carregar_estado() -> tuple[list[Timer], str, str, bool, float]:
     if not ARQUIVO_ESTADO.exists():
-        return [], "", "Trabalhista"
+        return [], "", "Trabalhista", False, 1.0
     conteudo = json.loads(ARQUIVO_ESTADO.read_text(encoding="utf-8"))
     campos_validos = {f.name for f in fields(Timer)}
     timers = [Timer(**{k: v for k, v in d.items() if k in campos_validos}) for d in conteudo["timers"]]
     for t in timers:
         if t.status == "rodando":
             t.pausar()
-    return timers, conteudo.get("advogado_atual", ""), conteudo.get("area_atual", "Trabalhista")
+    escala_miniatura = conteudo.get("escala_miniatura", 1.0)  # estado.json é editável na mão
+    return (timers, conteudo.get("advogado_atual", ""), conteudo.get("area_atual", "Trabalhista"),
+            conteudo.get("miniatura_ao_minimizar", False) is True,
+            escala_miniatura if isinstance(escala_miniatura, (int, float)) else 1.0)
 
 
 def _demo():

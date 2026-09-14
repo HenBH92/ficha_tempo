@@ -200,7 +200,7 @@ class InterfaceTests(unittest.TestCase):
             app.cards[-1].seg_modulo.set("Trabalhista")
 
             app.salvar()
-            timers, _, padrao = main.estado.carregar_estado()
+            timers, _, padrao, _, _ = main.estado.carregar_estado()
             assert [t.area for t in timers] == ["Contencioso", "Contencioso", "Trabalhista"], [t.area for t in timers]
             assert padrao == "Contencioso"
 
@@ -261,6 +261,86 @@ class InterfaceTests(unittest.TestCase):
             destroy(app)
         ''')
 
+    def test_minimize_shows_mini_window_of_last_started_card_when_enabled(self):
+        self.run_ui('''
+            app = make_app()
+            # O app de teste nao minimiza de verdade: simula o <Unmap>/<Map> da janela principal.
+            def minimizar():
+                with patch.object(app, "state", return_value="iconic"):
+                    app._ao_desmapear(SimpleNamespace(widget=app))
+            restaurar = lambda: app._ao_mapear(SimpleNamespace(widget=app))
+
+            primeiro = app.cards[0]
+            primeiro._iniciar()
+            minimizar()
+            assert app._miniatura is None      # desligada por padrao: minimiza como sempre
+
+            app.var_miniatura.set(True)
+            app.salvar()
+            assert main.estado.carregar_estado()[3] is True
+
+            app.novo_card()
+            segundo = app.cards[-1]
+            segundo.cb_pasta.set("PASTA-MINI")
+            segundo._iniciar()
+            primeiro.timer.segmento_inicio = "2000-01-01T08:00:00"   # iniciado bem antes
+            minimizar()
+            mini = app._miniatura
+            assert mini.card is segundo and mini.visivel()
+            assert "PASTA-MINI" in mini.label_pasta.cget("text")
+
+            # Ao minimizar o Tk manda um <Map> com a janela ainda "iconic": nao pode esconder.
+            with patch.object(app, "state", return_value="iconic"):
+                app._ao_mapear(SimpleNamespace(widget=app))
+            assert mini.visivel()
+
+            # Pausar/retomar pela miniatura e o mesmo caminho do card.
+            mini.btn_play_pause.invoke()
+            assert segundo.timer.status == "pausado"
+            mini.btn_play_pause.invoke()
+            assert segundo.timer.status == "rodando"
+
+            # Redimensiona como janela comum: puxar o canto superior esquerdo aumenta tudo junto,
+            # o canto oposto (inferior direito) fica parado e o tamanho vai pro estado.json.
+            app.update()
+            j = mini.janela
+            largura0 = j.winfo_width()
+            direita0, base0 = j.winfo_x() + largura0, j.winfo_y() + j.winfo_height()
+            canto = SimpleNamespace(x_root=j.winfo_rootx() + 2, y_root=j.winfo_rooty() + 2)
+            mini._ao_mover_mouse(canto)
+            assert j.cget("cursor") == "size_nw_se"
+            mini._ao_pressionar(canto)
+            mini._ao_arrastar(SimpleNamespace(x_root=canto.x_root - largura0 // 2, y_root=canto.y_root))
+            mini._ao_soltar(None)
+            app.update()
+            assert mini.escala == 1.5, mini.escala
+            assert j.winfo_width() > largura0 * 1.3
+            assert abs(j.winfo_x() + j.winfo_width() - direita0) <= 1
+            assert abs(j.winfo_y() + j.winfo_height() - base0) <= 1
+            assert main.estado.carregar_estado()[4] == 1.5
+            meio = SimpleNamespace(x_root=j.winfo_rootx() + j.winfo_width() // 2,
+                                   y_root=j.winfo_rooty() + j.winfo_height() // 2)
+            mini._ao_mover_mouse(meio)
+            assert j.cget("cursor") == ""      # no meio arrasta a janela, nao redimensiona
+
+            restaurar()
+            assert not mini.visivel()
+
+            # Nada rodando: o primeiro pausado nao lancado, pra poder retomar.
+            primeiro._pausar()
+            segundo._pausar()
+            primeiro.timer.inserido = True
+            minimizar()
+            assert mini.card is segundo and mini.visivel()
+            restaurar()
+
+            # Nenhum rodando/pausado: minimiza normal, sem miniatura.
+            segundo._parar()
+            minimizar()
+            assert not mini.visivel()
+            destroy(app)
+        ''')
+
     def test_second_consent_saves_all_cards_and_reopens_fixed_timer_without_reset(self):
         self.run_ui('''
             app = make_app()
@@ -293,7 +373,7 @@ class InterfaceTests(unittest.TestCase):
                 pump(app, lambda: close.called)
                 assert manager.aplicacoes == 1
             assert main.estado.retomada_pendente()
-            timers, _, _ = main.estado.carregar_estado()
+            timers, _, _, _, _ = main.estado.carregar_estado()
             assert len(timers) == 2
             assert timers[0].status == "pausado" and timers[0].acumulado_s >= 420
             assert timers[0].horas_cobraveis_texto == "3:45"
