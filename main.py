@@ -1172,11 +1172,11 @@ class App(ctk.CTk):
                     f"{c.cb_pasta.get().strip() or '(sem pasta)'}: {c.label_status_advwin.cget('text') or '✓ lançado'}"
                     for c in self._lote_pendentes
                 )
-                messagebox.showinfo(
-                    "Lançamento no AdvWin concluído",
-                    f"{self._lote_total - self._lote_erros} lançada(s) com sucesso, "
-                    f"{self._lote_erros} com erro.\n\n{log}",
-                )
+                mensagem = (f"{self._lote_total - self._lote_erros} lançada(s) com sucesso, "
+                            f"{self._lote_erros} com erro.\n\n{log}")
+            else:
+                mensagem = f"{self._lote_total} lançada(s) com sucesso."
+            messagebox.showinfo("Lançamento no AdvWin concluído", mensagem)
 
     def remover_card(self, card: TimerCard) -> None:
         self.cards.remove(card)

@@ -185,15 +185,17 @@ def _garantir_coluna_acoes_visivel(pagina) -> None:
 
 
 def lancar_horas(pagina, pasta: str, data: str, descricao: str, horas_texto: str,
-                  area: str = "Trabalhista") -> None:
+                  area: str = "Trabalhista", cobravel: bool = True) -> None:
     """Busca a pasta pelo código e lança um registro na aba "Ficha-Tempo".
 
     `pagina` deve vir de pagina_advwin() (sessão já autenticada). `data` no formato
     dd/mm/aaaa, `horas_texto` no formato h:mm - mesmos formatos já usados no card.
     `area` seleciona a listagem de pastas onde buscar ("Trabalhista" ou "Contencioso" -
     ver URLS_AREA), já que o código da pasta só é único dentro de cada área.
-    Preenche tanto "Horas" (TempoSimplificado) quanto "Horas Cobráveis" (Tempo) com o
-    mesmo valor (horas cobráveis do card) - decisão confirmada com o usuário.
+    Preenche "Horas" (TempoSimplificado) e, por padrão, "Horas Cobráveis" (Tempo) com o
+    mesmo valor (horas cobráveis do card) - decisão confirmada com o usuário. Com
+    `cobravel=False` (lançamento retroativo), só "Horas" leva o valor e "Horas Cobráveis"
+    vai zerado ("00:00").
     Sequência confirmada ao vivo via Chrome DevTools MCP contra o DOM real autenticado.
     """
     print(f'[advwin] buscando pasta "{pasta}" (área={area}, data={data}, horas={horas_texto})')
@@ -258,7 +260,7 @@ def lancar_horas(pagina, pasta: str, data: str, descricao: str, horas_texto: str
     quadro.locator('[data-test="Obs "]').fill(descricao)
     hhmm = _hhmm(horas_texto)
     quadro.locator('[data-test="TempoSimplificado"]').fill(hhmm)
-    quadro.locator('[data-test="Tempo"]').fill(hhmm)
+    quadro.locator('[data-test="Tempo"]').fill(hhmm if cobravel else "00:00")
     print("[advwin] descrição e horas preenchidas, salvando...")
     quadro.locator('[data-test="button-salvar-e-fechar"]').click()
     print("[advwin] salvar e fechar clicado")

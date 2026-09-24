@@ -10,7 +10,7 @@ from pathlib import Path
 import openpyxl
 
 ABA = "Ficha-tempo"
-COL_DATA, COL_ADVOGADO, COL_CLIENTE, COL_PASTA, COL_DESCRICAO, COL_HORAS_COBRAVEIS = 2, 3, 5, 6, 7, 9
+COL_DATA, COL_ADVOGADO, COL_CLIENTE, COL_PASTA, COL_DESCRICAO, COL_HORAS = 2, 3, 5, 6, 7, 8
 COL_STATUS = 17  # uma coluna depois da última usada pelo modelo (16 = Unidade)
 CABECALHO_STATUS = "Status AdvWin"
 PRIMEIRA_LINHA = 3
@@ -35,8 +35,10 @@ def _texto_data(valor) -> str:
 
 
 def _texto_horas(valor) -> str:
-    """"Horas Cobráveis" (coluna Tempo) pode voltar do Excel como time, timedelta ou
-    fração de dia, dependendo do formato da célula - normaliza tudo pra "h:mm"."""
+    """"Horas" (coluna 8) pode voltar do Excel como time, timedelta ou fração de dia,
+    dependendo do formato da célula - normaliza tudo pra "h:mm"."""
+    if valor is None:
+        return ""
     if isinstance(valor, timedelta):
         minutos = round(valor.total_seconds() / 60)
     elif isinstance(valor, time):
@@ -64,7 +66,7 @@ def ler_linhas_pendentes(caminho: Path) -> list[LinhaRetroativa]:
                 pasta=str(ws.cell(linha, COL_PASTA).value or "").strip(),
                 data=_texto_data(ws.cell(linha, COL_DATA).value),
                 descricao=str(ws.cell(linha, COL_DESCRICAO).value or "").strip(),
-                horas_texto=_texto_horas(ws.cell(linha, COL_HORAS_COBRAVEIS).value),
+                horas_texto=_texto_horas(ws.cell(linha, COL_HORAS).value),
                 advogado=str(ws.cell(linha, COL_ADVOGADO).value or "").strip(),
                 cliente=str(ws.cell(linha, COL_CLIENTE).value or "").strip(),
             ))
@@ -112,7 +114,7 @@ def _demo():
     assert len(pendentes) == 2, pendentes
     assert pendentes[0].pasta == "123VT-CIV-0001.01"
     assert pendentes[0].data == "10/08/2026"
-    assert pendentes[0].horas_texto == "0:35"
+    assert pendentes[0].horas_texto == "0:30"  # coluna "Horas" (8), não a cobrável (9)
     assert pendentes[0].advogado == "Fulano"
 
     marcar_linha(tmp, pendentes[0].linha, "Lançado em 24/08/2026 10:00")

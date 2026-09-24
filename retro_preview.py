@@ -2,6 +2,7 @@
 planilhas retroativas (ver retroativo.py) antes de mandar pro AdvWin, com campos
 editáveis e possibilidade de excluir linhas do lote. Sem cronômetro - são horas já
 registradas no passado, só falta lançar."""
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -100,7 +101,7 @@ class _LinhaPreview(ctk.CTkFrame):
         self._atualizar_estrela_pasta()
 
         self.entry_descricao = self._campo(campos, "Descrição", item.descricao, 240)
-        self.entry_horas = self._campo(campos, "Horas cobráveis", item.horas_texto, 90)
+        self.entry_horas = self._campo(campos, "Horas", item.horas_texto, 90)
 
         self.label_status = ctk.CTkLabel(self, text="", anchor="w", justify="left",
                                           font=ctk.CTkFont(size=11), text_color=COR_TEXTO_SUAVE)
@@ -175,6 +176,9 @@ class JanelaRetroativa(ctk.CTkToplevel):
         self.var_selecionar_todas = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(barra_selecao, text="Selecionar todas", variable=self.var_selecionar_todas,
                          command=self._alternar_selecionar_todas).pack(side="left")
+        ctk.CTkButton(barra_selecao, text="Baixar planilha modelo", height=28, fg_color="transparent",
+                       border_width=1, border_color=COR_PRIMARIA, text_color=COR_PRIMARIA,
+                       command=self._baixar_modelo).pack(side="right")
 
         self.scroll = ctk.CTkScrollableFrame(self, fg_color=("white", "#18181d"))
         self.scroll.pack(fill="both", expand=True, padx=16)
@@ -213,7 +217,7 @@ class JanelaRetroativa(ctk.CTkToplevel):
         self.focus_force()
 
     def _construir_relogio_total(self, master) -> ctk.CTkFrame:
-        """Total de horas cobráveis marcadas, estilizado como o relógio digital da tela principal."""
+        """Total de horas marcadas, estilizado como o relógio digital da tela principal."""
         caixa = ctk.CTkFrame(master, fg_color=COR_PRIMARIA, corner_radius=10,
                               border_width=1, border_color=COR_PRIMARIA_HOVER)
         conteudo = ctk.CTkFrame(caixa, fg_color="transparent")
@@ -263,6 +267,18 @@ class JanelaRetroativa(ctk.CTkToplevel):
         self.label_resumo.configure(text="")
         self.btn_lancar.configure(text="Lançar todas no AdvWin", state="normal")
         self._recalcular_total()
+
+    def _baixar_modelo(self) -> None:
+        destino = filedialog.asksaveasfilename(
+            parent=self, title="Salvar planilha modelo", defaultextension=".xlsx",
+            initialfile="planilha_modelo_ficha_tempo.xlsx", filetypes=[("Planilha Excel", "*.xlsx")],
+        )
+        if not destino:
+            return
+        try:
+            shutil.copy(planilha.CAMINHO_MODELO, destino)
+        except OSError as e:  # ex.: destino aberto no Excel
+            messagebox.showerror("Planilha modelo", f"Não foi possível salvar a planilha modelo:\n{e}")
 
     def _alternar_selecionar_todas(self) -> None:
         valor = self.var_selecionar_todas.get()
@@ -322,7 +338,7 @@ class JanelaRetroativa(ctk.CTkToplevel):
             advwin.enfileirar(
                 lambda item=item: advwin.lancar_horas(
                     advwin.pagina_advwin(), item.pasta, item.data, item.descricao, item.horas_texto,
-                    self.area_atual,
+                    self.area_atual, cobravel=False,
                 ),
                 lambda resultado, erro, lp=lp, item=item: self._apos_linha(lp, item, erro),
             )
@@ -339,7 +355,7 @@ class JanelaRetroativa(ctk.CTkToplevel):
                 planilha.inserir_linha({
                     "data": datetime.strptime(item.data, "%d/%m/%Y").date(),
                     "advogado": item.advogado, "cliente": item.cliente, "pasta": item.pasta,
-                    "descricao": item.descricao, "horas": horas, "horas_cobraveis": horas,
+                    "descricao": item.descricao, "horas": horas, "horas_cobraveis": timedelta(),
                 }, planilha.CAMINHO_LOG_ADVWIN)
             except Exception:
                 pass  # falha só no log local não deve travar o lote nem contar como erro
